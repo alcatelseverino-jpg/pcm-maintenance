@@ -185,6 +185,8 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
   .split{grid-template-columns:1fr}
   .half + .half{border-left:0;border-top:1px solid var(--line)}
 }
+.ask{margin-top:10px;padding:9px 12px;border-radius:8px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:13px}
+.tot td{border-top:2px solid var(--ink);background:var(--soft)}
 .pcell{width:34px;text-align:center;padding:0 4px}
 .pbtn{border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer;font-size:13px;line-height:1;padding:3px 6px}
 .pbtn:hover{background:#f1f5f9}
@@ -461,7 +463,7 @@ function setBusy(b) { $('#busy').hidden = !b; }
 function openModal({title, body, actions = [], wide = false}) {
   const dlg = $('#dlg');
   $('#dlgTitle').textContent = title;
-  $('#dlgBody').innerHTML = body + '<div class="err" id="dlgErr" hidden></div>';
+  $('#dlgBody').innerHTML = body + '<div class="ask" id="dlgAsk" hidden></div><div class="err" id="dlgErr" hidden></div>';
   dlg.classList.toggle('wide', wide);
   const foot = $('#dlgFoot'); foot.innerHTML = '';
   const cancel = document.createElement('button');
@@ -470,10 +472,21 @@ function openModal({title, body, actions = [], wide = false}) {
   actions.forEach(a => {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'btn ' + (a.cls || ''); b.textContent = a.label;
+    let armed = false;
     b.addEventListener('click', async () => {
       const err = $('#dlgErr'); if (err) err.hidden = true;
+      if (a.confirm) {   // confirmação em 2 passos, sem janela do navegador: 1º clique pede, 2º clique executa
+        const ask = $('#dlgAsk');
+        if (!armed) {
+          armed = true; b.textContent = a.confirmLabel || 'Confirmar';
+          if (ask) { ask.textContent = a.confirm; ask.hidden = false; }
+          setTimeout(() => { if (armed && b.isConnected) { armed = false; b.textContent = a.label; if (ask) ask.hidden = true; } }, 8000);
+          return;
+        }
+        armed = false; if (ask) ask.hidden = true;
+      }
       b.disabled = true;
-      try { await a.run(); } catch (e) { showErr(e); } finally { b.disabled = false; }
+      try { await a.run(); } catch (e) { showErr(e); } finally { b.disabled = false; b.textContent = a.label; }
     });
     foot.appendChild(b);
   });
@@ -625,9 +638,14 @@ $('#dlgBody').addEventListener('click', async e => {
   const ok = e.target.closest('[data-ncok]'), no = e.target.closest('[data-ncno]');
   if (!ok && !no) return;
   const id = (ok || no).dataset.ncok || (ok || no).dataset.ncno;
-  if (ok && !confirm('Confirmar esta não conformidade? O banco vai abrir uma OS corretiva para o equipamento.')) return;
-  if (no && !confirm('Descartar esta não conformidade? Nenhuma OS será aberta.')) return;
-  (ok || no).disabled = true;
+  const btn = ok || no;
+  if (!btn.dataset.armed) {   // 1º clique pede confirmação no próprio botão; 2º clique executa
+    btn.dataset.armed = '1'; btn.dataset.lbl = btn.textContent;
+    btn.textContent = ok ? 'Clique de novo: abrir OS corretiva' : 'Clique de novo: descartar';
+    setTimeout(() => { if (btn.isConnected && btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = btn.dataset.lbl; } }, 6000);
+    return;
+  }
+  btn.disabled = true;
   try {
     const {error} = await sb.rpc(ok ? 'confirmar_nao_conformidade' : 'descartar_nao_conformidade', {p_id: id});
     if (error) throw error;
@@ -793,12 +811,13 @@ async function openOS(id) {
     (ck.length ? `<div class="full"><label>Checklist (${ck.filter(c => c.resultado).length} de ${ck.length} respondidos)</label>` +
       ck.map(c => `<div class="ck"><div class="d">${esc(c.descricao)}</div>
         <select data-ck="${c.id}"${dis}>${optList(Object.entries(L.res), c.resultado, '—')}</select>
-        <input type="text" data-ckobs="${c.id}" placeholder="Observação" value="${esc(c.observacao || '')}"${dis}></div>`).join('') + '</div>' : '') +
+        <input type="text" data-ckobs="${c.id}" placeholder="Observação (obrigatória se Não OK)" value="${esc(c.observacao || '')}"${dis}></div>`).join('') + '</div>' : '') +
     (!done && !S.admin ? fld('PIN do técnico (necessário para fechar)', '<input id="o_pin" type="password" inputmode="numeric" autocomplete="off">') : '') +
     (!done && S.admin ? '<div class="full hint muted">Administrador fecha a OS sem PIN (a OS precisa ter técnico e checklist completo).</div>' : '') +
     (locked ? '<div class="warn full">OS confirmada: alterações bloqueadas. Somente o administrador pode reabrir.</div>' : '');
 
   const save = async () => {
+    let novasNC = 0;
     const txt = $('#o_eq').value.trim();
     let eqId = o.equipamento_id;
     if (txt !== origEqText) {
@@ -811,6 +830,11 @@ async function openOS(id) {
       titulo: nz($('#o_tit').value), descricao: nz($('#o_desc').value), servico_executado: nz($('#o_svc').value)
     };
     if (!done) patch.status = $('#o_st').value;
+    const semObs = ck.filter(c => $(`[data-ck="${c.id}"]`)?.value === 'nao_ok' && !nz($(`[data-ckobs="${c.id}"]`)?.value));
+    if (semObs.length) {
+      const el = $(`[data-ckobs="${semObs[0].id}"]`); if (el) { el.style.borderColor = 'var(--red)'; el.focus(); }
+      throw new Error(`Item “Não OK” precisa de observação: descreva o problema em “${semObs[0].descricao}”.` + (semObs.length > 1 ? ` (${semObs.length} itens sem observação)` : ''));
+    }
     const {data, error} = await sb.from('ordem_servico').update(patch).eq('id', o.id).select('id');
     if (error) throw error;
     if (!data?.length) throw new Error('Nenhuma linha alterada: você não tem permissão para alterar esta OS (ela pertence a outro técnico).');
@@ -819,14 +843,15 @@ async function openOS(id) {
       if (r !== (c.resultado ?? null) || ob !== (c.observacao ?? null)) {
         const {error: e2} = await sb.from('checklist_execucao').update({resultado: r, observacao: ob}).eq('id', c.id);
         if (e2) throw e2;
+        if (r === 'nao_ok' && c.resultado !== 'nao_ok') novasNC++;
       }
     }
+    if (novasNC) toast(`${novasNC} não conformidade(s) registrada(s): aguardam decisão em “⚠ Não conformidades”.`, 'good');
   };
 
   const actions = [];
   if (!locked) actions.push({label: 'Salvar', cls: 'pri', run: async () => { await save(); closeModal(); toast('OS salva.', 'good'); await loadAll(); }});
-  if (!locked && !done) actions.push({label: 'Salvar e fechar OS', cls: 'pri', run: async () => {
-    if (!confirm(`Fechar a OS ${o.numero}? Depois de confirmada, só o administrador pode reabrir.`)) return;
+  if (!locked && !done) actions.push({label: 'Salvar e fechar OS', cls: 'pri', confirm: `Fechar a OS ${o.numero}? Depois de confirmada, só o administrador pode reabrir.`, confirmLabel: 'Confirmar fechamento', run: async () => {
     await save();
     const {data, error} = await sb.rpc('confirmar_os', {p_os_id: o.id, p_pin: S.admin ? null : (nz($('#o_pin')?.value)), p_servico_executado: nz($('#o_svc').value)});
     if (error) throw error;
@@ -835,8 +860,7 @@ async function openOS(id) {
     toast('OS fechada' + (data.corretiva_id ? ' — foi aberta uma OS corretiva para os itens “Não OK”.' : '.'), 'good');
     await loadAll();
   }});
-  if (done && o.confirmada_em && S.admin) actions.push({label: 'Reabrir OS', cls: 'dan', run: async () => {
-    if (!confirm(`Reabrir a OS ${o.numero}? Ela volta para “Em execução”.`)) return;
+  if (done && o.confirmada_em && S.admin) actions.push({label: 'Reabrir OS', cls: 'dan', confirm: `Reabrir a OS ${o.numero}? Ela volta para “Em execução”.`, confirmLabel: 'Confirmar reabertura', run: async () => {
     const {data, error} = await sb.rpc('reabrir_os', {p_os_id: o.id});
     if (error) throw error;
     if (!data?.ok) throw new Error(data?.erro === 'os_nao_confirmada' ? 'A OS não está confirmada.' : 'Sem permissão para reabrir.');
@@ -879,9 +903,21 @@ async function printOS(numero, win) {
       throw new Error(`Não foi possível gerar o PDF da OS ${numero}` + (m ? ': ' + m : ` (HTTP ${resp.status})`));
     }
     const url = URL.createObjectURL(new Blob([await resp.arrayBuffer()], {type: 'application/pdf'}));
-    if (w && !w.closed) w.location.href = url;
-    else { const a = document.createElement('a'); a.href = url; a.download = `OS_${numero}.pdf`; document.body.appendChild(a); a.click(); a.remove(); }
-    setTimeout(() => URL.revokeObjectURL(url), 120000);
+    const nome = `${String(numero).replace(/[^\w.-]/g, '_')}.pdf`;   // arquivo = número da OS (ex.: 21679.pdf)
+    if (w && !w.closed) {
+      // um blob aberto direto salvaria com nome aleatório (uuid): a aba mostra o PDF e oferece Baixar/Imprimir com o nome certo
+      const d = w.document; d.open();
+      d.write(`<!doctype html><meta charset="utf-8"><title>${esc(nome.replace(/\.pdf$/, ''))}</title>
+<style>html,body{margin:0;height:100%;font:14px system-ui,sans-serif}body{display:flex;flex-direction:column}
+.bar{display:flex;gap:8px;align-items:center;padding:8px 12px;background:#0f766e;color:#fff}
+.bar a,.bar button{background:#fff;color:#0f172a;border:0;border-radius:6px;padding:6px 12px;font-weight:600;cursor:pointer;text-decoration:none;font-size:13px}
+iframe{flex:1;border:0;width:100%}</style>
+<div class="bar"><b>OS ${esc(String(numero))}</b><span style="flex:1"></span><a href="${url}" download="${esc(nome)}">Baixar ${esc(nome)}</a><button id="p">Imprimir</button></div>
+<iframe id="f" src="${url}"></iframe>`);
+      d.close();
+      d.getElementById('p').onclick = () => { try { d.getElementById('f').contentWindow.focus(); d.getElementById('f').contentWindow.print(); } catch (_) { w.print(); } };
+    } else { const a = document.createElement('a'); a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove(); }
+    setTimeout(() => URL.revokeObjectURL(url), 600000);
   } catch (e) { if (w && !w.closed) w.close(); throw e; }
 }
 
@@ -1198,6 +1234,11 @@ function renderProd() {
   const rows = [...by.entries()].sort((a, b) => b[1].min - a[1].min || b[1].n - a[1].n);
   $('#pBody').innerHTML = rows.map(([id, r]) => `<tr style="cursor:default"><td>${esc(S.tecById.get(id)?.nome || '—')} <span class="muted">${S.tecById.get(id)?.regime === 'mei' ? 'MEI' : 'CLT'}</span></td><td class="num">${r.n}</td><td class="num">${r.regs}</td><td class="num">${nf1(r.min / 60)}</td><td class="num">${nf1(r.prev / 60)}</td><td class="num">${nf1(r.corr / 60)}</td>${(() => { const d = dispMin(id), pc = d ? Math.round(100 * r.min / d) : null; return `<td class="num">${nf1(d / 60)}</td><td class="num"><b>${pc == null ? '—' : pc + '%'}</b></td><td style="width:60px"><div class="bar"><i style="width:${Math.min(100, pc || 0)}%"></i></div></td>`; })()}</tr>`).join('')
     || '<tr><td colspan="9" class="empty" style="cursor:default">Sem atividade no período/filtros.</td></tr>';
+  if (rows.length) {   // linha final: total geral (todos os técnicos listados)
+    const T = rows.reduce((t, [id, r]) => ({n: t.n + r.n, regs: t.regs + r.regs, min: t.min + r.min, prev: t.prev + r.prev, corr: t.corr + r.corr, disp: t.disp + dispMin(id)}), {n: 0, regs: 0, min: 0, prev: 0, corr: 0, disp: 0});
+    const pc = T.disp ? Math.round(100 * T.min / T.disp) : null;
+    $('#pBody').insertAdjacentHTML('beforeend', `<tr class="tot" style="cursor:default"><td><b>TOTAL GRANALHA</b></td><td class="num"><b>${T.n}</b></td><td class="num"><b>${T.regs}</b></td><td class="num"><b>${nf1(T.min / 60)}</b></td><td class="num"><b>${nf1(T.prev / 60)}</b></td><td class="num"><b>${nf1(T.corr / 60)}</b></td><td class="num"><b>${nf1(T.disp / 60)}</b></td><td class="num"><b>${pc == null ? '—' : pc + '%'}</b></td><td></td></tr>`);
+  }
   const semOs = regs.filter(r => !r.ordem_servico_id).length;
   $('#pNote').textContent = regs.length
     ? `Produtividade = horas registradas ÷ horas disponíveis (seg–sex 8 h, sábado 4 h, domingo 0). CLT: contam os dias em que a equipe CLT registrou (dia sem registro = feriado); se faltou, a produtividade cai. MEI: contam só os dias em que ele próprio registrou. Pode passar de 100%. ${semOs} de ${regs.length} registros (${Math.round(100 * semOs / regs.length)}%) não têm OS vinculada: contam nas horas, mas não em “OS conc.”. Por isso um técnico pode ter muitas horas e poucas OS concluídas.`
