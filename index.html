@@ -336,7 +336,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
           </div>
           <div class="kpis" id="pKpis"></div>
           <table>
-            <thead><tr><th>Técnico</th><th class="num" title="OS concluídas no período (pela data de conclusão)">OS conc.</th><th class="num" title="Registros de manutenção lançados no período (com ou sem OS)">Regist.</th><th class="num">Horas</th><th class="num" title="Horas dos registros do tipo preventiva">H. prev.</th><th class="num" title="Horas dos registros do tipo corretiva">H. corr.</th><th></th></tr></thead>
+            <thead><tr><th>Técnico</th><th class="num" title="OS concluídas no período (pela data de conclusão)">OS conc.</th><th class="num" title="Registros de manutenção lançados no período (com ou sem OS)">Regist.</th><th class="num">Horas</th><th class="num" title="Horas dos registros do tipo preventiva">H. prev.</th><th class="num" title="Horas dos registros do tipo corretiva">H. corr.</th><th class="num" title="Cada dia com registro do técnico vale 8 h (seg–sex) ou 4 h (sábado); domingo não soma">H. disp.</th><th class="num" title="Horas registradas ÷ horas disponíveis">Prod. %</th><th></th></tr></thead>
             <tbody id="pBody"></tbody>
           </table>
           <div class="note">Horas = soma de (hora fim − hora início) dos registros de manutenção no período; horas preventivas/corretivas seguem o tipo do registro. OS concluídas = pela data de conclusão. “Em aberto agora” não depende do período.</div>
@@ -1094,14 +1094,21 @@ function renderProd() {
   const by = new Map();
   const get = id => { if (!by.has(id)) by.set(id, {n: 0, regs: 0, min: 0, prev: 0, corr: 0}); return by.get(id); };
   done.forEach(o => { get(o.tecnico_id).n++; });
+  // horas disponíveis: dia com registro do técnico vale 8 h (seg–sex) ou 4 h (sáb); domingo não soma (44 h/semana)
+  const dias = new Map();
+  S.regs.forEach(r => {
+    if (!r.data_servico || (p.de && r.data_servico < p.de) || (p.ate && r.data_servico > p.ate) || !okTec(r.tecnico_id)) return;
+    if (!dias.has(r.tecnico_id)) dias.set(r.tecnico_id, new Set());
+    dias.get(r.tecnico_id).add(r.data_servico);
+  });
+  const dispMin = id => { let h = 0; (dias.get(id) || []).forEach(d => { const w = new Date(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)).getDay(); h += w === 0 ? 0 : w === 6 ? 4 : 8; }); return h * 60; };
   regs.forEach(r => { const g = get(r.tecnico_id), m = mins(r); g.regs++; g.min += m; if (r.tipo_manutencao === 'preventiva') g.prev += m; else if (r.tipo_manutencao === 'corretiva') g.corr += m; });
   const rows = [...by.entries()].sort((a, b) => b[1].min - a[1].min || b[1].n - a[1].n);
-  const max = Math.max(1, ...rows.map(r => r[1].min));
-  $('#pBody').innerHTML = rows.map(([id, r]) => `<tr style="cursor:default"><td>${esc(S.tecById.get(id)?.nome || '—')}</td><td class="num">${r.n}</td><td class="num">${r.regs}</td><td class="num">${nf1(r.min / 60)}</td><td class="num">${nf1(r.prev / 60)}</td><td class="num">${nf1(r.corr / 60)}</td><td style="width:60px"><div class="bar"><i style="width:${Math.round(100 * r.min / max)}%"></i></div></td></tr>`).join('')
-    || '<tr><td colspan="7" class="empty" style="cursor:default">Sem atividade no período/filtros.</td></tr>';
+  $('#pBody').innerHTML = rows.map(([id, r]) => `<tr style="cursor:default"><td>${esc(S.tecById.get(id)?.nome || '—')}</td><td class="num">${r.n}</td><td class="num">${r.regs}</td><td class="num">${nf1(r.min / 60)}</td><td class="num">${nf1(r.prev / 60)}</td><td class="num">${nf1(r.corr / 60)}</td>${(() => { const d = dispMin(id), pc = d ? Math.round(100 * r.min / d) : null; return `<td class="num">${nf1(d / 60)}</td><td class="num"><b>${pc == null ? '—' : pc + '%'}</b></td><td style="width:60px"><div class="bar"><i style="width:${Math.min(100, pc || 0)}%"></i></div></td>`; })()}</tr>`).join('')
+    || '<tr><td colspan="9" class="empty" style="cursor:default">Sem atividade no período/filtros.</td></tr>';
   const semOs = regs.filter(r => !r.ordem_servico_id).length;
   $('#pNote').textContent = regs.length
-    ? `${semOs} de ${regs.length} registros (${Math.round(100 * semOs / regs.length)}%) não têm OS vinculada: contam nas horas, mas não em “OS conc.”. Por isso um técnico pode ter muitas horas e poucas OS concluídas.`
+    ? `Produtividade = horas registradas ÷ horas disponíveis (dia com registro = 8 h; sábado = 4 h; domingo = 0). Pode passar de 100%. ${semOs} de ${regs.length} registros (${Math.round(100 * semOs / regs.length)}%) não têm OS vinculada: contam nas horas, mas não em “OS conc.”. Por isso um técnico pode ter muitas horas e poucas OS concluídas.`
     : '';
 }
 
