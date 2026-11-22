@@ -786,6 +786,7 @@ async function openOS(id) {
     if (!data?.ok) throw new Error(data?.erro === 'os_nao_confirmada' ? 'A OS não está confirmada.' : 'Sem permissão para reabrir.');
     closeModal(); toast('OS reaberta.', 'good'); await loadAll();
   }});
+  actions.push({label: '🖨 Imprimir', run: async () => { await printOS(o.numero); }});
   openModal({title: `Ordem de serviço ${o.numero}`, body, actions, wide: true});
 }
 
@@ -805,6 +806,29 @@ function fechamentoErro(r) {
   }
 }
 
+/* ---- impressão da OS (edge function gerar-os-pdf, via proxy com CORS gerar-os-pdf-web) ---- */
+async function printOS(numero, win) {
+  const w = win || window.open('', '_blank');
+  if (w) { try { w.document.title = 'OS ' + numero; w.document.body.innerHTML = '<p style="font:14px sans-serif;padding:16px">Gerando PDF da OS ' + esc(String(numero)) + '…</p>'; } catch (_) {} }
+  try {
+    const {data: {session}} = await sb.auth.getSession();
+    if (!session) throw new Error('Sessão expirada. Entre novamente.');
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/gerar-os-pdf-web`, {
+      method: 'POST',
+      headers: {Authorization: 'Bearer ' + session.access_token, apikey: SUPABASE_KEY, 'Content-Type': 'application/json'},
+      body: JSON.stringify({os_numero: String(numero)})
+    });
+    if (!resp.ok) {
+      let m = ''; try { const j = await resp.json(); m = j.error || ''; } catch (_) {}
+      throw new Error(`Não foi possível gerar o PDF da OS ${numero}` + (m ? ': ' + m : ` (HTTP ${resp.status})`));
+    }
+    const url = URL.createObjectURL(new Blob([await resp.arrayBuffer()], {type: 'application/pdf'}));
+    if (w && !w.closed) w.location.href = url;
+    else { const a = document.createElement('a'); a.href = url; a.download = `OS_${numero}.pdf`; document.body.appendChild(a); a.click(); a.remove(); }
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  } catch (e) { if (w && !w.closed) w.close(); throw e; }
+}
+
 /* ---- nova OS ---- */
 function openNewOS(pre = {}) {
   // pre.equipId = vindo do calendário: OS preventiva já preenchida (mesmo padrão do app: título = nome do plano, descrição "PREVENTIVA", prioridade baixa)
@@ -820,7 +844,9 @@ function openNewOS(pre = {}) {
     fld('Descrição técnica', `<textarea id="n_desc">${pe ? 'PREVENTIVA' : ''}</textarea>`, {full: true}) +
     (pe && !planoPre ? '<div class="warn full">Este equipamento não tem plano de manutenção ativo: a OS será aberta sem plano e sem checklist.</div>' : '') +
     '<div class="full hint muted">O número da OS é gerado automaticamente pelo banco.</div>';
-  openModal({title: pe ? `Nova OS preventiva — ${pe.codigo || pe.nome}` : 'Nova ordem de serviço', body, actions: [{label: 'Abrir OS', cls: 'pri', run: async () => {
+  const criar = async imprimir => {
+    const win = imprimir ? window.open('', '_blank') : null;   // abre já no clique para o navegador não bloquear
+    try {
     const eq = S.eqByCod.get($('#n_eq').value.trim().toUpperCase());
     if (!eq) throw new Error('Informe um código de equipamento existente.');
     const tipo = $('#n_tipo').value;
@@ -837,7 +863,10 @@ function openNewOS(pre = {}) {
     closeModal();
     toast(`OS ${data.numero} aberta.` + (tipo === 'preventiva' && !plano ? ' Atenção: o equipamento não tem plano ativo, então não há checklist.' : ''), 'good');
     await loadAll();
-  }}]});
+    if (imprimir) await printOS(data.numero, win);
+    } catch (e) { if (win && !win.closed) win.close(); throw e; }
+    };
+  openModal({title: pe ? `Nova OS preventiva — ${pe.codigo || pe.nome}` : 'Nova ordem de serviço', body, actions: [{label: 'Abrir OS', cls: 'pri', run: () => criar(false)}, {label: 'Abrir e imprimir', cls: 'pri', run: () => criar(true)}]});
   $('#n_eq').addEventListener('input', ev => { const e = S.eqByCod.get(ev.target.value.trim().toUpperCase()); $('#n_eqn').textContent = e ? e.nome : ''; });
 }
 
