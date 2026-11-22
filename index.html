@@ -160,16 +160,17 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
 .toast.good{background:#166534}
 
 /* ---------- painel de OS dividido ao meio ---------- */
-.split{flex:1;min-height:0;display:grid;grid-template-columns:1.2fr 1fr}
+.split{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1.3fr}
 .half{display:flex;flex-direction:column;min-height:0;min-width:0}
 .half + .half{border-left:1px solid var(--line)}
 .half .pb{flex:1;min-height:0;overflow:auto}
 .halfh{padding:7px 10px;background:var(--soft);border-bottom:1px solid var(--line);font-size:12.5px;font-weight:700;color:#334155}
-.regt td,.regt th{padding:5px 6px;font-size:12px}
-.regt td.desc{min-width:110px;line-height:1.3}
+.regt td,.regt th{padding:5px 4px;font-size:12px}
+.regt th{white-space:normal;line-height:1.15;vertical-align:bottom}
+.regt td.desc{min-width:70px;line-height:1.25}
 .nw{white-space:nowrap}
 .regt tr.tot td{background:#f0fdfa;font-weight:700;border-top:2px solid var(--brand)}
-@media (max-width:1480px){
+@media (max-width:1750px){
   .grid{grid-template-columns:1fr;height:auto}
   .panel{max-height:none}
   #p-os .pb{max-height:60vh}
@@ -226,24 +227,38 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
           <option value="todas">Todas</option>
         </select>
       </div>
+      <div class="sub" title="O período filtra as OS concluídas (pela data de conclusão) e define o intervalo somado na coluna “Tempo grupo”. OS abertas aparecem sempre. A semana vai de segunda a domingo.">
+        <label>Período
+          <select id="osMode">
+            <option value="semana">Semana</option><option value="dia">Dia</option>
+            <option value="mes">Mês</option><option value="tudo">Todo o período</option>
+          </select>
+        </label>
+        <button class="btn" id="osPrev" type="button" title="Período anterior">‹</button>
+        <input type="date" id="osRef">
+        <button class="btn" id="osNext" type="button" title="Próximo período">›</button>
+        <button class="btn" id="osToday" type="button">Hoje</button>
+        <b id="osPerLbl" style="font-size:12px"></b>
+        <label>Grupo <select id="osGrp"></select></label>
+      </div>
       <div class="split">
-        <!-- esquerda: registros de manutenção da OS sob o cursor -->
-        <div class="half">
-          <div class="halfh" id="regTitle">Registros de manutenção</div>
-          <div class="pb">
-            <table class="regt">
-              <thead><tr><th>Data</th><th>Técnico</th><th>Equip.</th><th>Tipo</th><th>Descrição</th><th class="num">Tempo</th></tr></thead>
-              <tbody id="regBody"></tbody>
-            </table>
-          </div>
-        </div>
-        <!-- direita: ordens de serviço -->
+        <!-- esquerda: ordens de serviço -->
         <div class="half">
           <div class="halfh">Ordens de serviço <span class="muted" style="font-weight:400">· passe o cursor sobre uma OS</span></div>
           <div class="pb">
             <table>
               <thead><tr><th>Nº</th><th>Equip.</th><th>Técnico</th><th>Status</th></tr></thead>
               <tbody id="osBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <!-- direita: registros de manutenção da OS sob o cursor -->
+        <div class="half">
+          <div class="halfh" id="regTitle">Registros de manutenção</div>
+          <div class="pb">
+            <table class="regt">
+              <thead><tr><th>Data</th><th>Técnico</th><th>Equip.</th><th>Tipo</th><th>Descrição</th><th class="num">Tempo</th><th class="num" title="Soma do tempo de todos os registros do grupo de equipamentos no período escolhido">Tempo grupo</th></tr></thead>
+              <tbody id="regBody"></tbody>
             </table>
           </div>
         </div>
@@ -395,7 +410,7 @@ const S = {
   os: [], cal: [], calByEq: new Map(), regs: [], regd: [], regOS: null,
   edGrupos: [], selGrupo: null, edEquips: [],
   f: {
-    os:  {q: '', status: 'abertas'},
+    os:  {q: '', status: 'abertas', grupo: '', mode: 'semana', ref: iso(new Date())},
     cal: {month: firstOfMonth(), st: {atrasado: true, proximo: true, ok: true}, grupo: '', eq: '', de: '', ate: '', sel: null},
     prod:{de: iso(firstOfMonth()), ate: iso(new Date()), tec: '', grupo: ''},
     mm:  {de: '', ate: '', grupo: '', eq: ''}
@@ -564,7 +579,7 @@ async function loadAll() {
 
 function fillSelects() {
   const gOpts = optList(S.grupos.map(g => [g.id, g.nome]), '', 'Todos os grupos');
-  ['#calGrp', '#pGrp', '#mGrp'].forEach(id => { const el = $(id), v = el.value; el.innerHTML = gOpts; el.value = v; });
+  ['#calGrp', '#pGrp', '#mGrp', '#osGrp'].forEach(id => { const el = $(id), v = el.value; el.innerHTML = gOpts; el.value = v; });
   const el = $('#pTec'), v = el.value;
   el.innerHTML = optList(S.tecnicos.map(t => [t.id, t.nome]), '', 'Todos os técnicos'); el.value = v;
 }
@@ -575,10 +590,16 @@ function renderAll() { renderOS(); renderRegs(); renderCal(); renderGroups(); re
    ORDENS DE SERVIÇO (painel esquerdo)
    ==================================================================== */
 function renderOS() {
-  const f = S.f.os, q = f.q.trim().toLowerCase();
+  const f = S.f.os, q = f.q.trim().toLowerCase(), rng = periodRange(f.mode, f.ref);
+  $('#osPerLbl').textContent = periodLabel(f.mode, rng);
   const rows = S.os.filter(o => {
     if (f.status === 'abertas' && o.status === 'concluida') return false;
     if (!['abertas', 'todas'].includes(f.status) && o.status !== f.status) return false;
+    if (f.grupo && S.eqById.get(o.equipamento_id)?.grupo_id !== f.grupo) return false;
+    if (f.mode !== 'tudo' && o.status === 'concluida') {          // período vale para as concluídas (data de conclusão)
+      const k = o.data_conclusao ? dayKey(o.data_conclusao) : '';
+      if (!k || k < rng[0] || k > rng[1]) return false;
+    }
     if (q) {
       const e = S.eqById.get(o.equipamento_id), t = S.tecById.get(o.tecnico_id);
       if (![o.numero, o.titulo, e?.codigo, e?.nome, t?.nome].join(' ').toLowerCase().includes(q)) return false;
@@ -600,21 +621,50 @@ function renderOS() {
 const fmtD = s => { if (!s) return '—'; const [y, m, d] = String(s).split('-'); return `${d}/${m}/${y.slice(2)}`; };
 const tempoMin = t => { const m = /^(\d+)h(\d+)$/.exec(t || ''); return m ? (+m[1]) * 60 + (+m[2]) : 0; };
 const tempoFmt = min => `${String(Math.floor(min / 60)).padStart(2, '0')}h${String(min % 60).padStart(2, '0')}`;
+/* ---- período (dia / semana / mês) e tempo por grupo de equipamentos ---- */
+function periodRange(mode, ref) {
+  const [y, m, d] = ref.split('-').map(Number);
+  if (mode === 'dia') return [ref, ref];
+  if (mode === 'semana') { const dow = (new Date(y, m - 1, d).getDay() + 6) % 7; return [iso(new Date(y, m - 1, d - dow)), iso(new Date(y, m - 1, d - dow + 6))]; }   // segunda a domingo
+  if (mode === 'mes') return [iso(new Date(y, m - 1, 1)), iso(new Date(y, m, 0))];
+  return ['', '9999-12-31'];
+}
+function periodLabel(mode, [a, b]) {
+  if (mode === 'tudo') return 'todo o período';
+  if (mode === 'dia') return 'dia ' + fmtD(a);
+  if (mode === 'mes') { const [y, m] = a.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('pt-BR', {month: 'long', year: 'numeric'}); }
+  return `semana ${fmtD(a)} a ${fmtD(b)}`;
+}
+function groupTimes(rng) {   // minutos por grupo (nome) dos registros dentro do período
+  const m = new Map();
+  S.regd.forEach(r => { if (r.data >= rng[0] && r.data <= rng[1]) m.set(r.grupo ?? '', (m.get(r.grupo ?? '') || 0) + tempoMin(r.tempo)); });
+  return m;
+}
+function shiftPeriod(n) {
+  const f = S.f.os; if (f.mode === 'tudo') return;
+  const [y, m, d] = f.ref.split('-').map(Number);
+  f.ref = iso(f.mode === 'dia' ? new Date(y, m - 1, d + n) : f.mode === 'semana' ? new Date(y, m - 1, d + 7 * n) : new Date(y, m - 1 + n, 1));
+  $('#osRef').value = f.ref; renderOS(); renderRegs();
+}
+
 function renderRegs() {
+  const f = S.f.os, rng = periodRange(f.mode, f.ref), gt = groupTimes(rng);
   const o = S.os.find(x => x.id === S.regOS), body = $('#regBody'), title = $('#regTitle');
   if (!o) {
     title.textContent = 'Registros de manutenção';
-    body.innerHTML = '<tr><td colspan="6" class="empty" style="cursor:default">Passe o cursor sobre uma OS (à direita) para ver os registros de manutenção vinculados a ela.</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="empty" style="cursor:default">Passe o cursor sobre uma OS (à esquerda) para ver os registros de manutenção vinculados a ela.</td></tr>';
     return;
   }
   const rows = S.regd.filter(r => r.ordem_servico === o.numero);
-  title.textContent = `Registros da OS ${o.numero} (${rows.length})`;
-  body.innerHTML = rows.length
-    ? rows.map(r => `<tr style="cursor:default"><td class="nw">${fmtD(r.data)}</td><td>${esc(r.tecnico)}</td>
-        <td class="mono" title="${esc(r.equipamento)}">${esc(r.equipamento_codigo)}</td><td title="${esc(L.tipo[r.tipo] || r.tipo)}">${esc({preventiva: 'Prev.', corretiva: 'Corr.', checklist: 'Check.'}[r.tipo] || r.tipo)}</td>
-        <td class="desc">${esc(r.descricao)}</td><td class="num nw">${esc(r.tempo)}</td></tr>`).join('')
-      + `<tr class="tot" style="cursor:default"><td colspan="5">Tempo total da OS</td><td class="num nw">${tempoFmt(rows.reduce((s, r) => s + tempoMin(r.tempo), 0))}</td></tr>`
-    : '<tr><td colspan="6" class="empty" style="cursor:default">Nenhum registro de manutenção vinculado a esta OS.</td></tr>';
+  title.textContent = `Registros da OS ${o.numero} (${rows.length}) · Tempo grupo: ${periodLabel(f.mode, rng)}`;
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="7" class="empty" style="cursor:default">Nenhum registro de manutenção vinculado a esta OS.</td></tr>'; return; }
+  const gmin = r => gt.get(r.grupo ?? '') || 0;
+  const grupos = new Set(rows.map(r => r.grupo ?? ''));
+  body.innerHTML = rows.map(r => `<tr style="cursor:default"><td class="nw">${fmtD(r.data)}</td><td>${esc(r.tecnico)}</td>
+      <td class="mono" title="${esc(r.equipamento)}">${esc(r.equipamento_codigo)}</td><td title="${esc(L.tipo[r.tipo] || r.tipo)}">${esc({preventiva: 'Prev.', corretiva: 'Corr.', checklist: 'Check.'}[r.tipo] || r.tipo)}</td>
+      <td class="desc">${esc(r.descricao)}</td><td class="num nw">${esc(r.tempo)}</td>
+      <td class="num nw" title="Grupo: ${esc(r.grupo || 'sem grupo')}">${tempoFmt(gmin(r))}</td></tr>`).join('')
+    + `<tr class="tot" style="cursor:default"><td colspan="5">Tempo total da OS</td><td class="num nw">${tempoFmt(rows.reduce((s, r) => s + tempoMin(r.tempo), 0))}</td><td class="num nw">${grupos.size === 1 ? tempoFmt(gmin(rows[0])) : '—'}</td></tr>`;
 }
 function showRegs(id) {
   if (S.regOS === id) return;
@@ -624,6 +674,17 @@ function showRegs(id) {
 }
 $('#osQ').addEventListener('input', e => { S.f.os.q = e.target.value; renderOS(); });
 $('#osSt').addEventListener('change', e => { S.f.os.status = e.target.value; renderOS(); });
+$('#osGrp').addEventListener('change', e => { S.f.os.grupo = e.target.value; renderOS(); });
+$('#osMode').value = S.f.os.mode; $('#osRef').value = S.f.os.ref;
+$('#osMode').addEventListener('change', e => {
+  S.f.os.mode = e.target.value;
+  ['#osRef', '#osPrev', '#osNext', '#osToday'].forEach(id => { $(id).disabled = S.f.os.mode === 'tudo'; });
+  renderOS(); renderRegs();
+});
+$('#osRef').addEventListener('change', e => { if (e.target.value) { S.f.os.ref = e.target.value; renderOS(); renderRegs(); } });
+$('#osPrev').addEventListener('click', () => shiftPeriod(-1));
+$('#osNext').addEventListener('click', () => shiftPeriod(1));
+$('#osToday').addEventListener('click', () => { S.f.os.ref = iso(new Date()); $('#osRef').value = S.f.os.ref; renderOS(); renderRegs(); });
 $('#osBody').addEventListener('mouseover', e => { const tr = e.target.closest('tr[data-os]'); if (tr) showRegs(tr.dataset.os); });
 $('#osBody').addEventListener('click', e => { const tr = e.target.closest('tr[data-os]'); if (tr) openOS(tr.dataset.os); });
 $('#btnNewOS').addEventListener('click', () => openNewOS());
