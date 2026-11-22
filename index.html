@@ -113,6 +113,7 @@ td.empty{text-align:center;color:var(--muted);padding:22px;cursor:default}
 .ev .lg{flex:none}
 .ev .t{flex:1;min-width:0}
 .ev small{color:var(--muted)}
+.ev .btn{padding:4px 9px;font-size:12px;white-space:nowrap}
 
 /* ---------- indicadores ---------- */
 .tabs{display:flex;gap:4px}
@@ -407,7 +408,7 @@ const S = {
   tecnicos: [], tecById: new Map(),
   equips: [], eqById: new Map(), eqByCod: new Map(),
   grupos: [], grpById: new Map(),
-  os: [], cal: [], calByEq: new Map(), regs: [], regd: [], regOS: null,
+  os: [], cal: [], calByEq: new Map(), regs: [], regd: [], regOS: null, planoById: new Map(),
   edGrupos: [], selGrupo: null, edEquips: [],
   f: {
     os:  {q: '', status: 'abertas', grupo: '', mode: 'semana', ref: iso(new Date())},
@@ -540,7 +541,7 @@ async function fetchAll(table, select, orderCol) {
 async function loadAll() {
   setBusy(true);
   try {
-    const [tec, eq, gr, os, cal, regs, regd, edg] = await Promise.all([
+    const [tec, eq, gr, os, cal, regs, regd, planos, edg] = await Promise.all([
       fetchAll('tecnico', 'id,nome,matricula,ativo'),
       fetchAll('equipamento', 'id,codigo,nome,descricao,grupo_id,localizacao_id,fabricante,modelo,numero_serie,status,criticidade,geral'),
       fetchAll('grupo_equipamento', 'id,nome,descricao,codigo_base,ativo'),
@@ -548,6 +549,7 @@ async function loadAll() {
       fetchAll('vw_proxima_manutencao_equipamento', '*'),
       fetchAll('registro_manutencao', 'id,equipamento_id,tecnico_id,tipo_manutencao,data_servico,hora_inicio,hora_fim'),
       fetchAll('vw_registro_manutencao_detalhado', 'data,inicio,fim,tempo,tecnico,equipamento_codigo,equipamento,grupo,ordem_servico,tipo,descricao', ['data', 'inicio', 'equipamento_codigo', 'tecnico']),
+      fetchAll('plano_manutencao', 'id,codigo,nome,grupo_id,periodicidade_dias,ativo'),
       // as funções editor_* exigem perfil admin no banco; técnicos usam um modo leitura montado a partir das tabelas
       S.admin ? sb.rpc('editor_listar_grupos') : Promise.resolve({data: null, error: null})
     ]);
@@ -564,6 +566,7 @@ async function loadAll() {
     S.calByEq = new Map(cal.map(e => [e.equipamento_id, e]));
     S.regs = regs;
     S.regd = regd;
+    S.planoById = new Map(planos.map(p => [p.id, p]));
     S.edGrupos = S.admin
       ? (edg.data || [])
       : S.grupos.filter(g => g.ativo).map(g => ({
@@ -801,22 +804,28 @@ function fechamentoErro(r) {
 }
 
 /* ---- nova OS ---- */
-function openNewOS() {
+function openNewOS(pre = {}) {
+  // pre.equipId = vindo do calendário: OS preventiva já preenchida (mesmo padrão do app: título = nome do plano, descrição "PREVENTIVA", prioridade baixa)
+  const pe = pre.equipId ? S.eqById.get(pre.equipId) : null;
+  const planoPre = pe ? S.planoById.get(S.calByEq.get(pe.id)?.plano_id) : null;
   const body =
-    fld('Código do equipamento *', `<input id="n_eq" list="dlEq" autocomplete="off" placeholder="digite o código">${equipDatalist()}`, {hint: '<span id="n_eqn"></span>'}) +
+    fld('Código do equipamento *', `<input id="n_eq" list="dlEq" autocomplete="off" placeholder="digite o código" value="${esc(pe?.codigo || '')}">${equipDatalist(pe?.id)}`, {hint: `<span id="n_eqn">${esc(pe?.nome || '')}</span>`}) +
     fld('Técnico', `<select id="n_tec">${tecOptions('')}</select>`) +
-    fld('Tipo *', `<select id="n_tipo">${optList(Object.entries(L.tipo), 'corretiva')}</select>`,
+    fld('Tipo *', `<select id="n_tipo">${optList(Object.entries(L.tipo), pe ? 'preventiva' : 'corretiva')}</select>`,
         {hint: 'Preventiva usa o plano do grupo do equipamento (gera o checklist).'}) +
-    fld('Prioridade *', `<select id="n_prio">${optList(Object.entries(L.prio), 'media')}</select>`) +
+    fld('Prioridade *', `<select id="n_prio">${optList(Object.entries(L.prio), pe ? 'baixa' : 'media')}</select>`) +
     fld('SLA (horas)', `<input id="n_sla" type="number" min="1" value="24">`) +
-    fld('Título', `<input id="n_tit" placeholder="se vazio, o banco gera automaticamente">`, {full: true}) +
-    fld('Descrição', `<textarea id="n_desc"></textarea>`, {full: true}) +
+    fld('Título', `<input id="n_tit" placeholder="se vazio, o banco gera automaticamente" value="${esc(planoPre?.nome || '')}">`, {full: true}) +
+    fld('Descrição técnica', `<textarea id="n_desc">${pe ? 'PREVENTIVA' : ''}</textarea>`, {full: true}) +
+    (pe && !planoPre ? '<div class="warn full">Este equipamento não tem plano de manutenção ativo: a OS será aberta sem plano e sem checklist.</div>' : '') +
     '<div class="full hint muted">O número da OS é gerado automaticamente pelo banco.</div>';
-  openModal({title: 'Nova ordem de serviço', body, actions: [{label: 'Abrir OS', cls: 'pri', run: async () => {
+  openModal({title: pe ? `Nova OS preventiva — ${pe.codigo || pe.nome}` : 'Nova ordem de serviço', body, actions: [{label: 'Abrir OS', cls: 'pri', run: async () => {
     const eq = S.eqByCod.get($('#n_eq').value.trim().toUpperCase());
     if (!eq) throw new Error('Informe um código de equipamento existente.');
     const tipo = $('#n_tipo').value;
     const plano = tipo === 'preventiva' ? S.calByEq.get(eq.id)?.plano_id : null;
+    const dup = plano ? S.os.find(o => o.equipamento_id === eq.id && o.plano_id === plano && o.status !== 'concluida') : null;
+    if (dup) throw new Error(`Já existe a OS ${dup.numero} (${L.os[dup.status]}) para este equipamento e plano. Conclua essa OS antes de abrir outra.`);
     const payload = {
       equipamento_id: eq.id, tipo, status: 'aberta', prioridade: $('#n_prio').value,
       tecnico_id: $('#n_tec').value || null, sla_horas: parseInt($('#n_sla').value, 10) || 24,
@@ -870,6 +879,11 @@ function renderCal() {
   renderDayDetail(by);
 }
 
+function evAction(e) {   // botão por equipamento: abrir OS preventiva, ou ir para a OS que já está aberta
+  const o = S.os.find(x => x.equipamento_id === e.equipamento_id && x.plano_id === e.plano_id && x.status !== 'concluida');
+  return o ? `<button type="button" class="btn" data-openos="${o.id}" title="Já existe uma OS aberta para este equipamento">OS ${esc(o.numero)}</button>`
+           : `<button type="button" class="btn pri" data-newprev="${e.equipamento_id}">＋ OS preventiva</button>`;
+}
 function renderDayDetail(by) {
   const k = S.f.cal.sel, box = $('#calDetail');
   if (!k) { box.innerHTML = '<span class="muted">Clique em um dia para ver os equipamentos.</span>'; return; }
@@ -879,7 +893,7 @@ function renderDayDetail(by) {
   box.innerHTML = `<h4>${dd}/${mm}/${yy} — ${list.length} equipamento(s)</h4>` +
     (list.map(e => `<div class="ev"><i class="lg lg-${e.status_manutencao}"></i>
       <div class="t"><b class="mono">${esc(e.equipamento_codigo || '')}</b> ${esc(e.equipamento_nome || '')}<br><small>${esc(e.grupo_nome || '')} · a cada ${e.periodicidade_dias ?? '—'} dias · última: ${esc(fmtDate(e.ultima_manutencao))}</small></div>
-      <small>${esc(L.cal[e.status_manutencao] || '')}<br>${e.dias_restantes != null ? (e.dias_restantes < 0 ? Math.abs(e.dias_restantes) + ' d de atraso' : e.dias_restantes + ' d restantes') : ''}</small></div>`).join('')
+      <small>${esc(L.cal[e.status_manutencao] || '')}<br>${e.dias_restantes != null ? (e.dias_restantes < 0 ? Math.abs(e.dias_restantes) + ' d de atraso' : e.dias_restantes + ' d restantes') : ''}</small>${evAction(e)}</div>`).join('')
       || '<span class="muted">Nenhum vencimento neste dia (com os filtros atuais).</span>');
 }
 
@@ -891,6 +905,10 @@ $('#calDays').addEventListener('click', e => {
   renderCal();
 });
 const moveMonth = n => { const m = S.f.cal.month; S.f.cal.month = new Date(m.getFullYear(), m.getMonth() + n, 1); renderCal(); };
+$('#calDetail').addEventListener('click', e => {
+  const n = e.target.closest('[data-newprev]'); if (n) { openNewOS({equipId: n.dataset.newprev}); return; }
+  const o = e.target.closest('[data-openos]'); if (o) openOS(o.dataset.openos);
+});
 $('#calPrev').addEventListener('click', () => moveMonth(-1));
 $('#calNext').addEventListener('click', () => moveMonth(1));
 $('#calToday').addEventListener('click', () => { S.f.cal.month = firstOfMonth(); S.f.cal.sel = iso(new Date()); renderCal(); });
