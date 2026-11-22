@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GestorPCM — Painel de Manutenção</title>
+<style>
+:root{
+  --bg:#eef2f6; --card:#fff; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --soft:#f8fafc;
+  --brand:#0f766e; --brand-d:#115e59; --brand-l:#ccfbf1;
+  --red:#dc2626; --yel:#eab308; --grn:#16a34a; --blue:#2563eb; --orange:#ea580c;
+  --r:12px; --shadow:0 1px 2px rgba(15,23,42,.06),0 4px 14px rgba(15,23,42,.05);
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+button,input,select,textarea{font:inherit;color:inherit}
+[hidden]{display:none!important}
+
+/* ---------- topo ---------- */
+.top{height:56px;background:linear-gradient(90deg,#0b3b4a,#0f766e);color:#fff;display:flex;align-items:center;gap:14px;padding:0 16px;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.top h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
+.top h1 small{font-weight:500;opacity:.75;font-size:12px}
+.top .sp{flex:1}
+.chip{background:rgba(255,255,255,.16);border-radius:999px;padding:4px 12px;font-size:12px;white-space:nowrap}
+.top .btn{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.28);color:#fff}
+.top .btn:hover{background:rgba(255,255,255,.26)}
+#busy{font-size:12px;opacity:.85}
+
+/* ---------- layout ---------- */
+.grid{display:grid;grid-template-columns:minmax(340px,27%) minmax(430px,1fr) minmax(400px,32%);gap:12px;padding:12px;height:calc(100vh - 56px)}
+.right{display:grid;grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:12px;min-height:0}
+.panel{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}
+.ph{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.ph h2{font-size:14px;margin:0;font-weight:700;flex:1;white-space:nowrap}
+.pb{flex:1;min-height:0;overflow:auto}
+.pf{padding:10px 12px;border-top:1px solid var(--line);background:var(--soft)}
+.sub{padding:8px 12px;border-bottom:1px solid var(--line);background:var(--soft);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* ---------- controles ---------- */
+.btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:600;font-size:13px;transition:.15s}
+.btn:hover{background:#f1f5f9}
+.btn:disabled{opacity:.55;cursor:wait}
+.btn.pri{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.pri:hover{background:var(--brand-d)}
+.btn.dan{background:#fff;border-color:#fecaca;color:var(--red)}
+.btn.dan:hover{background:#fef2f2}
+.btn.blk{width:100%;padding:9px}
+.ib{border:1px solid var(--line);background:#fff;border-radius:6px;width:26px;height:26px;cursor:pointer;line-height:1}
+.ib:hover{background:var(--brand-l);border-color:var(--brand)}
+input,select,textarea{border:1px solid #cbd5e1;border-radius:8px;padding:6px 9px;background:#fff;min-width:0;width:100%}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--brand-l);border-color:var(--brand)}
+input[disabled],select[disabled],textarea[disabled]{background:#f1f5f9;color:#64748b}
+textarea{resize:vertical;min-height:60px}
+.sub input,.sub select{width:auto;padding:4px 8px;font-size:13px}
+.sub input[type=search]{flex:1;min-width:110px}
+.sub label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px}
+
+/* ---------- tabelas ---------- */
+table{border-collapse:collapse;width:100%}
+th{position:sticky;top:0;background:#f1f5f9;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);padding:7px 8px;border-bottom:1px solid var(--line);z-index:1;white-space:nowrap}
+td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:#f0fdfa}
+tbody tr.sel{background:var(--brand-l)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+td.act{width:34px;text-align:right}
+td.empty{text-align:center;color:var(--muted);padding:22px;cursor:default}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+.ell{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;white-space:nowrap}
+.b-aberta{background:#dbeafe;color:#1d4ed8}
+.b-em_execucao{background:#ffedd5;color:#c2410c}
+.b-concluida{background:#dcfce7;color:#15803d}
+.b-operando{background:#dcfce7;color:#15803d}
+.b-em_manutencao{background:#ffedd5;color:#c2410c}
+.b-parado_com_defeito{background:#fee2e2;color:#b91c1c}
+.b-desativado{background:#e2e8f0;color:#475569}
+.p-urgente{color:var(--red);font-weight:700}
+.p-alta{color:var(--orange);font-weight:700}
+.p-media{color:#475569}
+.p-baixa{color:#94a3b8}
+.muted{color:var(--muted)}
+.note{font-size:12px;color:var(--muted);padding:8px 12px}
+.warn{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 10px;font-size:12.5px;margin:8px 12px}
+
+/* ---------- calendário ---------- */
+.calwrap{padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-height:0}
+.calnav{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.calnav h3{margin:0;font-size:16px;min-width:150px;text-align:center}
+.calnav input[type=month]{width:auto}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.dow,.days{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.dow div{text-align:center;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;padding:2px 0}
+.day{position:relative;min-height:64px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;padding:4px 6px;text-align:left;display:flex;flex-direction:column;justify-content:space-between}
+.day:hover{border-color:var(--brand);background:#f0fdfa}
+.day .n{font-weight:700;font-size:13px}
+.day.other{background:#f8fafc}
+.day.other .n{color:#94a3b8;font-weight:500}
+.day.today{box-shadow:inset 0 0 0 2px var(--brand)}
+.day.sel{background:var(--brand-l);border-color:var(--brand)}
+.dots{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.dot{display:inline-flex;align-items:center;justify-content:center;min-width:14px;height:14px;border-radius:999px;font-size:9px;font-weight:800;color:#fff;padding:0 3px}
+.dot.atrasado,.lg-atrasado{background:var(--red)}
+.dot.proximo,.lg-proximo{background:var(--yel);color:#422006}
+.dot.ok,.lg-ok{background:var(--grn)}
+.lg{display:inline-block;width:11px;height:11px;border-radius:50%}
+.detail{border-top:1px solid var(--line);padding-top:8px}
+.detail h4{margin:0 0 6px;font-size:13px}
+.ev{display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px dashed var(--line);font-size:13px}
+.ev .lg{flex:none}
+.ev .t{flex:1;min-width:0}
+.ev small{color:var(--muted)}
+
+/* ---------- indicadores ---------- */
+.tabs{display:flex;gap:4px}
+.tabs button{border:0;background:transparent;padding:5px 12px;border-radius:8px;font-weight:700;color:var(--muted);cursor:pointer}
+.tabs button.on{background:var(--brand-l);color:var(--brand-d)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;padding:10px 12px}
+.kpi{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--soft)}
+.kpi b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.kpi span{font-size:11px;color:var(--muted)}
+.bar{height:8px;border-radius:99px;background:#e2e8f0;overflow:hidden;min-width:60px}
+.bar i{display:block;height:100%;background:var(--brand)}
+
+/* ---------- modal ---------- */
+dialog{border:0;border-radius:14px;padding:0;width:min(560px,94vw);box-shadow:0 20px 60px rgba(15,23,42,.35);color:var(--ink)}
+dialog.wide{width:min(760px,95vw)}
+dialog::backdrop{background:rgba(15,23,42,.5)}
+.dh{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
+.dh h3{margin:0;flex:1;font-size:16px}
+.dh button{border:0;background:transparent;font-size:20px;cursor:pointer;color:var(--muted)}
+.db{padding:14px 18px;max-height:68vh;overflow:auto;display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+.db .full{grid-column:1/-1}
+.db label{display:block;font-size:12px;font-weight:700;color:#334155;margin-bottom:3px}
+.db .hint{font-size:11.5px;color:var(--muted);margin-top:3px;font-weight:400}
+.df{display:flex;gap:8px;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--line);background:var(--soft);border-radius:0 0 14px 14px;flex-wrap:wrap}
+.err{grid-column:1/-1;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;padding:8px 10px;font-size:13px}
+.ok-msg{grid-column:1/-1;background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:8px 10px;font-size:13px}
+.ck{display:grid;grid-template-columns:1fr 110px;gap:6px;padding:6px 0;border-bottom:1px dashed var(--line);align-items:center}
+.ck input[type=text]{grid-column:1/-1;font-size:12.5px}
+.ck .d{font-size:13px}
+.chk{display:flex;align-items:center;gap:8px}
+.chk input{width:auto}
+.chk label{margin:0}
+
+/* ---------- login ---------- */
+#login{min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,#0b3b4a,#0f766e);padding:16px}
+.lcard{background:#fff;border-radius:16px;padding:28px;width:min(380px,100%);box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.lcard h1{margin:0 0 4px;font-size:22px}
+.lcard p{margin:0 0 18px;color:var(--muted)}
+.lcard label{display:block;font-size:12px;font-weight:700;margin:10px 0 3px}
+
+/* ---------- avisos ---------- */
+#toasts{position:fixed;right:14px;bottom:14px;display:flex;flex-direction:column;gap:8px;z-index:99}
+.toast{background:#0f172a;color:#fff;border-radius:10px;padding:10px 14px;box-shadow:var(--shadow);max-width:380px;font-size:13px}
+.toast.bad{background:#991b1b}
+.toast.good{background:#166534}
+
+@media (max-width:1250px){
+  .grid{grid-template-columns:1fr;height:auto}
+  .panel{max-height:none}
+  #p-os .pb{max-height:60vh}
+  .right{grid-template-rows:auto auto}
+  .right .pb{max-height:55vh}
+}
+@media (max-width:560px){
+  .db{grid-template-columns:1fr}
+  .day{min-height:50px}
+}
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<div id="login">
+  <form class="lcard" id="loginForm">
+    <h1>GestorPCM</h1>
+    <p>Painel de administração da manutenção</p>
+    <label for="lEmail">E-mail</label>
+    <input id="lEmail" type="email" autocomplete="username" required>
+    <label for="lPass">Senha</label>
+    <input id="lPass" type="password" autocomplete="current-password" required>
+    <div id="lErr" class="err" style="margin-top:12px" hidden></div>
+    <button class="btn pri blk" id="lBtn" style="margin-top:16px" type="submit">Entrar</button>
+    <p class="muted" style="font-size:12px;margin:12px 0 0">Use o mesmo usuário (e-mail e senha) do Supabase Auth que já usa no GestorPCM.</p>
+  </form>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app" hidden>
+  <header class="top">
+    <h1>⚙ GestorPCM <small>Painel de Manutenção</small></h1>
+    <span class="sp"></span>
+    <span id="busy" hidden>Carregando…</span>
+    <span class="chip" id="userChip"></span>
+    <button class="btn" id="btnReload" type="button">↻ Atualizar</button>
+    <button class="btn" id="btnOut" type="button">Sair</button>
+  </header>
+
+  <main class="grid">
+    <!-- ESQUERDA: ORDENS DE SERVIÇO -->
+    <section class="panel" id="p-os">
+      <div class="ph"><h2>Ordens de serviço</h2><span class="muted" id="osCount"></span></div>
+      <div class="sub">
+        <input type="search" id="osQ" placeholder="Buscar nº, equipamento, técnico…">
+        <select id="osSt">
+          <option value="abertas">Abertas + em execução</option>
+          <option value="aberta">Somente abertas</option>
+          <option value="em_execucao">Em execução</option>
+          <option value="concluida">Concluídas</option>
+          <option value="todas">Todas</option>
+        </select>
+      </div>
+      <div class="pb">
+        <table>
+          <thead><tr><th>Nº</th><th>Equip.</th><th>Técnico</th><th>Status</th><th>Prior.</th></tr></thead>
+          <tbody id="osBody"></tbody>
+        </table>
+      </div>
+      <div class="pf"><button class="btn pri blk" id="btnNewOS" type="button">＋ Abrir nova ordem de serviço</button></div>
+    </section>
+
+    <!-- CENTRO: CALENDÁRIO -->
+    <section class="panel" id="p-cal">
+      <div class="ph"><h2>Calendário de manutenção preventiva</h2>
+        <div class="legend">
+          <span><i class="lg lg-atrasado"></i>Vencido <b id="cntA">0</b></span>
+          <span><i class="lg lg-proximo"></i>Próximo a vencer <b id="cntP">0</b></span>
+          <span><i class="lg lg-ok"></i>Em dia <b id="cntO">0</b></span>
+        </div>
+      </div>
+      <div class="sub">
+        <label>Grupo <select id="calGrp"></select></label>
+        <label>Equipamento <input type="search" id="calEq" placeholder="código ou nome"></label>
+        <label>De <input type="date" id="calDe"></label>
+        <label>Até <input type="date" id="calAte"></label>
+        <label><input type="checkbox" id="calA" checked style="width:auto">Vencidos</label>
+        <label><input type="checkbox" id="calP" checked style="width:auto">Próximos</label>
+        <label><input type="checkbox" id="calO" checked style="width:auto">Em dia</label>
+        <button class="btn" id="calClr" type="button">Limpar filtros</button>
+      </div>
+      <div class="pb calwrap">
+        <div class="calnav">
+          <button class="btn" id="calPrev" type="button">‹</button>
+          <h3 id="calTitle"></h3>
+          <button class="btn" id="calNext" type="button">›</button>
+          <button class="btn" id="calToday" type="button">Hoje</button>
+          <input type="month" id="calMonth">
+          <button class="btn" id="calOld" type="button" title="Ir ao vencimento mais antigo ainda em atraso">⚠ Vencido mais antigo</button>
+        </div>
+        <div class="dow"><div>Dom</div><div>Seg</div><div>Ter</div><div>Qua</div><div>Qui</div><div>Sex</div><div>Sáb</div></div>
+        <div class="days" id="calDays"></div>
+        <div class="detail" id="calDetail"><span class="muted">Clique em um dia para ver os equipamentos.</span></div>
+      </div>
+    </section>
+
+    <!-- DIREITA: GRUPOS/EQUIPAMENTOS + INDICADORES -->
+    <section class="right">
+      <div class="panel" id="p-grp">
+        <div class="ph"><h2>Grupos e equipamentos</h2>
+          <button class="btn" id="btnNewG" type="button">＋ Grupo</button>
+          <button class="btn" id="btnNewE" type="button">＋ Equipamento</button>
+        </div>
+        <div class="sub"><input type="search" id="grpQ" placeholder="Buscar grupo…"></div>
+        <div class="pb">
+          <div id="admNote" class="warn" hidden>Somente administradores podem editar grupos e equipamentos. Você está em modo leitura.</div>
+          <table>
+            <thead><tr><th>Grupo</th><th>Cód.</th><th class="num">Equip.</th><th class="num">Dias</th><th class="num">Check.</th><th></th></tr></thead>
+            <tbody id="grpBody"></tbody>
+          </table>
+          <div class="sub" style="border-top:1px solid var(--line)"><b id="eqTitle">Equipamentos</b></div>
+          <table>
+            <thead><tr><th>Código</th><th>Nome</th><th>Status</th><th class="num">Dias</th><th></th></tr></thead>
+            <tbody id="eqBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" id="p-ind">
+        <div class="ph"><h2>Indicadores</h2>
+          <div class="tabs"><button class="on" data-tab="prod" type="button">Produtividade</button><button data-tab="mm" type="button">MTBF / MTTR</button></div>
+        </div>
+        <div id="tabProd" class="pb">
+          <div class="sub">
+            <label>De <input type="date" id="pDe"></label>
+            <label>Até <input type="date" id="pAte"></label>
+            <label>Técnico <select id="pTec"></select></label>
+            <label>Grupo <select id="pGrp"></select></label>
+          </div>
+          <div class="kpis" id="pKpis"></div>
+          <table>
+            <thead><tr><th>Técnico</th><th class="num">OS conc.</th><th class="num">Prev.</th><th class="num">Corr.</th><th class="num">Horas</th><th></th></tr></thead>
+            <tbody id="pBody"></tbody>
+          </table>
+          <div class="note">Horas = soma de (hora fim − hora início) dos registros de manutenção no período. OS concluídas = pela data de conclusão. “Em aberto agora” não depende do período.</div>
+        </div>
+        <div id="tabMM" class="pb" hidden>
+          <div class="sub">
+            <label>De <input type="date" id="mDe"></label>
+            <label>Até <input type="date" id="mAte"></label>
+            <label>Grupo <select id="mGrp"></select></label>
+            <label>Equip. <input type="search" id="mEq" placeholder="código ou nome"></label>
+          </div>
+          <div class="kpis" id="mKpis"></div>
+          <table>
+            <thead><tr><th>Equipamento</th><th class="num">Falhas</th><th class="num">MTTR (h)</th><th class="num">MTBF (dias)</th></tr></thead>
+            <tbody id="mBody"></tbody>
+          </table>
+          <div class="note">Mesma fórmula da view <span class="mono">vw_indicadores_equipamento</span>, aplicada ao período filtrado: considera OS corretivas concluídas (filtradas pela data de abertura). MTTR = média do tempo gasto (ou conclusão − abertura). MTBF = média dos dias entre aberturas consecutivas no mesmo equipamento (exige 2+ corretivas).</div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ================= MODAL ================= -->
+<dialog id="dlg">
+  <div class="dh"><h3 id="dlgTitle"></h3><button type="button" id="dlgX" aria-label="Fechar">✕</button></div>
+  <div class="db" id="dlgBody"></div>
+  <div class="df" id="dlgFoot"></div>
+</dialog>
+<div id="toasts"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+'use strict';
+/* ====================================================================
+   CONFIGURAÇÃO — projeto Supabase "GestorPCM"
+   A chave abaixo é a chave PÚBLICA (publishable). A segurança real é
+   feita pelas políticas RLS do banco; sem login nada é lido/gravado.
+   ==================================================================== */
+const SUPABASE_URL = 'https://zvaexuejxhjuckllwpqk.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_W1xzLOqVqIu2d-vVC4n1kw_RWb97Q6h';
+const TZ = 'America/Sao_Paulo';
+
+/* ---------- utilidades ---------- */
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtDate = v => v ? new Date(v).toLocaleDateString('pt-BR', {timeZone: TZ}) : '—';
+const fmtDT   = v => v ? new Date(v).toLocaleString('pt-BR', {timeZone: TZ, dateStyle: 'short', timeStyle: 'short'}) : '—';
+const dayKey  = v => new Date(v).toLocaleDateString('en-CA', {timeZone: TZ});      // AAAA-MM-DD
+const iso     = d => d.toLocaleDateString('en-CA');                                  // data local AAAA-MM-DD
+const nf1     = v => (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('pt-BR', {minimumFractionDigits: 1, maximumFractionDigits: 1});
+const firstOfMonth = (d = new Date()) => new Date(d.getFullYear(), d.getMonth(), 1);
+const nz = v => { v = (v ?? '').toString().trim(); return v === '' ? null : v; };
+
+const L = {
+  os:   {aberta: 'Aberta', em_execucao: 'Em execução', concluida: 'Concluída'},
+  prio: {baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente: 'Urgente'},
+  tipo: {preventiva: 'Preventiva', corretiva: 'Corretiva', checklist: 'Checklist'},
+  eq:   {operando: 'Operando', em_manutencao: 'Em manutenção', parado_com_defeito: 'Parado com defeito', desativado: 'Desativado'},
+  crit: {baixa: 'Baixa', media: 'Média', alta: 'Alta'},
+  cal:  {atrasado: 'Vencido', proximo: 'Próximo a vencer', ok: 'Em dia'},
+  res:  {ok: 'OK', nao_ok: 'Não OK', na: 'N/A'}
+};
+
+/* ---------- estado ---------- */
+const S = {
+  user: null, perfil: null, admin: false,
+  tecnicos: [], tecById: new Map(),
+  equips: [], eqById: new Map(), eqByCod: new Map(),
+  grupos: [], grpById: new Map(),
+  os: [], cal: [], calByEq: new Map(), regs: [],
+  edGrupos: [], selGrupo: null, edEquips: [],
+  f: {
+    os:  {q: '', status: 'abertas'},
+    cal: {month: firstOfMonth(), st: {atrasado: true, proximo: true, ok: true}, grupo: '', eq: '', de: '', ate: '', sel: null},
+    prod:{de: iso(firstOfMonth()), ate: iso(new Date()), tec: '', grupo: ''},
+    mm:  {de: '', ate: '', grupo: '', eq: ''}
+  }
+};
+
+let sb = null;
+
+/* ---------- avisos / erros ---------- */
+function toast(msg, kind = '') {
+  const t = document.createElement('div');
+  t.className = 'toast ' + kind; t.textContent = msg;
+  $('#toasts').appendChild(t);
+  setTimeout(() => t.remove(), kind === 'bad' ? 7000 : 3500);
+}
+function errMsg(e) {
+  if (!e) return 'Erro desconhecido.';
+  const m = e.message || String(e), d = e.details ? ' (' + e.details + ')' : '';
+  switch (e.code) {
+    case '42501': return 'Sem permissão para esta operação (regra de segurança do banco). ' + m;
+    case '23505': return 'Valor duplicado: já existe um registro com esse valor único.' + d;
+    case '23503': return 'Referência inválida ou registro em uso por outra tabela.' + d;
+    case '23514': return 'Valor não aceito pelas regras do banco: ' + m + d;
+    case '23502': return 'Campo obrigatório vazio: ' + m;
+    default: return m + d;
+  }
+}
+function showErr(e) {
+  const msg = errMsg(e);
+  const box = $('#dlgErr');
+  if ($('#dlg').open && box) { box.textContent = msg; box.hidden = false; box.scrollIntoView({block: 'nearest'}); }
+  else toast(msg, 'bad');
+}
+function setBusy(b) { $('#busy').hidden = !b; }
+
+/* ---------- modal ---------- */
+function openModal({title, body, actions = [], wide = false}) {
+  const dlg = $('#dlg');
+  $('#dlgTitle').textContent = title;
+  $('#dlgBody').innerHTML = body + '<div class="err" id="dlgErr" hidden></div>';
+  dlg.classList.toggle('wide', wide);
+  const foot = $('#dlgFoot'); foot.innerHTML = '';
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'btn'; cancel.textContent = 'Cancelar';
+  cancel.addEventListener('click', closeModal); foot.appendChild(cancel);
+  actions.forEach(a => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'btn ' + (a.cls || ''); b.textContent = a.label;
+    b.addEventListener('click', async () => {
+      const err = $('#dlgErr'); if (err) err.hidden = true;
+      b.disabled = true;
+      try { await a.run(); } catch (e) { showErr(e); } finally { b.disabled = false; }
+    });
+    foot.appendChild(b);
+  });
+  if (!dlg.open) dlg.showModal();
+}
+function closeModal() { const d = $('#dlg'); if (d.open) d.close(); }
+
+const fld = (label, html, opt = {}) =>
+  `<div class="${opt.full ? 'full' : ''}"><label>${label}</label>${html}${opt.hint ? `<div class="hint">${opt.hint}</div>` : ''}</div>`;
+const optList = (pairs, cur, blank) =>
+  (blank != null ? `<option value="">${esc(blank)}</option>` : '') +
+  pairs.map(([v, t]) => `<option value="${esc(v)}"${String(v) === String(cur ?? '') ? ' selected' : ''}>${esc(t)}</option>`).join('');
+
+/* ====================================================================
+   ACESSO (login)
+   ==================================================================== */
+function showLogin() { $('#app').hidden = true; $('#login').hidden = false; }
+function showApp()   { $('#login').hidden = true; $('#app').hidden = false; }
+
+async function boot() {
+  if (!window.supabase) {
+    $('#lErr').textContent = 'Não foi possível carregar a biblioteca do Supabase (verifique a conexão com a internet).';
+    $('#lErr').hidden = false; $('#lBtn').disabled = true; return;
+  }
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {auth: {persistSession: true, autoRefreshToken: true}});
+  sb.auth.onAuthStateChange((ev, session) => {
+    // não chamar o Supabase diretamente aqui dentro (evita travar): adia para fora do callback
+    setTimeout(() => {
+      if (session?.user) {
+        if (!S.user || S.user.id !== session.user.id) { S.user = session.user; startApp(); }
+      } else { S.user = null; showLogin(); }
+    }, 0);
+  });
+}
+
+$('#loginForm').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const btn = $('#lBtn'), err = $('#lErr');
+  btn.disabled = true; err.hidden = true;
+  const {error} = await sb.auth.signInWithPassword({email: $('#lEmail').value.trim(), password: $('#lPass').value});
+  btn.disabled = false;
+  if (error) { err.textContent = error.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : error.message; err.hidden = false; }
+});
+$('#btnOut').addEventListener('click', async () => { await sb.auth.signOut(); });
+$('#btnReload').addEventListener('click', () => loadAll().catch(showErr));
+
+async function startApp() {
+  showApp();
+  try {
+    const {data: p} = await sb.from('perfil').select('nome,papel').eq('id', S.user.id).maybeSingle();
+    S.perfil = p; S.admin = p?.papel === 'admin';
+  } catch (_) { S.admin = false; }
+  $('#userChip').textContent = (S.perfil?.nome || S.user.email) + ' · ' + (S.admin ? 'administrador' : 'técnico');
+  $('#admNote').hidden = S.admin;
+  $('#btnNewG').hidden = !S.admin; $('#btnNewE').hidden = !S.admin;
+  try { await loadAll(); } catch (e) { toast(errMsg(e), 'bad'); }
+}
+
+/* ====================================================================
+   DADOS
+   ==================================================================== */
+async function fetchAll(table, select, orderCol) {
+  const out = [], size = 1000;
+  for (let from = 0; ; from += size) {
+    let q = sb.from(table).select(select).range(from, from + size - 1);
+    if (orderCol) q = q.order(orderCol, {ascending: false});
+    const {data, error} = await q;
+    if (error) throw error;
+    out.push(...data);
+    if (data.length < size) break;
+  }
+  return out;
+}
+
+async function loadAll() {
+  setBusy(true);
+  try {
+    const [tec, eq, gr, os, cal, regs, edg] = await Promise.all([
+      fetchAll('tecnico', 'id,nome,matricula,ativo'),
+      fetchAll('equipamento', 'id,codigo,nome,descricao,grupo_id,localizacao_id,fabricante,modelo,numero_serie,status,criticidade,geral'),
+      fetchAll('grupo_equipamento', 'id,nome,descricao,codigo_base,ativo'),
+      fetchAll('ordem_servico', 'id,numero,equipamento_id,plano_id,tecnico_id,tipo,status,prioridade,titulo,descricao,sla_horas,data_abertura,data_limite,data_conclusao,tempo_gasto_minutos,servico_executado,confirmada_em', 'data_abertura'),
+      fetchAll('vw_proxima_manutencao_equipamento', '*'),
+      fetchAll('registro_manutencao', 'id,equipamento_id,tecnico_id,tipo_manutencao,data_servico,hora_inicio,hora_fim'),
+      // as funções editor_* exigem perfil admin no banco; técnicos usam um modo leitura montado a partir das tabelas
+      S.admin ? sb.rpc('editor_listar_grupos') : Promise.resolve({data: null, error: null})
+    ]);
+    if (edg.error) throw edg.error;
+    S.tecnicos = tec.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+    S.tecById = new Map(tec.map(t => [t.id, t]));
+    S.equips = eq.sort((a, b) => (a.codigo || '').localeCompare(b.codigo || '', 'pt-BR', {numeric: true}));
+    S.eqById = new Map(eq.map(e => [e.id, e]));
+    S.eqByCod = new Map(eq.filter(e => e.codigo).map(e => [e.codigo.trim().toUpperCase(), e]));
+    S.grupos = gr.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+    S.grpById = new Map(gr.map(g => [g.id, g]));
+    S.os = os;
+    S.cal = cal.filter(e => e.proxima_manutencao);
+    S.calByEq = new Map(cal.map(e => [e.equipamento_id, e]));
+    S.regs = regs;
+    S.edGrupos = S.admin
+      ? (edg.data || [])
+      : S.grupos.filter(g => g.ativo).map(g => ({
+          grupo_id: g.id, grupo_nome: g.nome, codigo_base: g.codigo_base, plano_id: null, periodicidade_dias: null, qtd_itens_checklist: null,
+          qtd_equipamentos: eq.filter(e => e.grupo_id === g.id && e.status !== 'desativado').length
+        })).filter(g => g.qtd_equipamentos > 0);
+    S.edGrupos.sort((a, b) => a.grupo_nome.localeCompare(b.grupo_nome, 'pt-BR'));
+    fillSelects();
+    renderAll();
+    if (S.selGrupo) await loadEquips(S.selGrupo, false);
+  } finally { setBusy(false); }
+}
+
+function fillSelects() {
+  const gOpts = optList(S.grupos.map(g => [g.id, g.nome]), '', 'Todos os grupos');
+  ['#calGrp', '#pGrp', '#mGrp'].forEach(id => { const el = $(id), v = el.value; el.innerHTML = gOpts; el.value = v; });
+  const el = $('#pTec'), v = el.value;
+  el.innerHTML = optList(S.tecnicos.map(t => [t.id, t.nome]), '', 'Todos os técnicos'); el.value = v;
+}
+
+function renderAll() { renderOS(); renderCal(); renderGroups(); renderEquips(); renderProd(); renderMM(); }
+
+/* ====================================================================
+   ORDENS DE SERVIÇO (painel esquerdo)
+   ==================================================================== */
+function renderOS() {
+  const f = S.f.os, q = f.q.trim().toLowerCase();
+  const rows = S.os.filter(o => {
+    if (f.status === 'abertas' && o.status === 'concluida') return false;
+    if (!['abertas', 'todas'].includes(f.status) && o.status !== f.status) return false;
+    if (q) {
+      const e = S.eqById.get(o.equipamento_id), t = S.tecById.get(o.tecnico_id);
+      if (![o.numero, o.titulo, e?.codigo, e?.nome, t?.nome].join(' ').toLowerCase().includes(q)) return false;
+    }
+    return true;
+  }).sort((a, b) => new Date(b.data_abertura) - new Date(a.data_abertura));
+  $('#osCount').textContent = `${rows.length} de ${S.os.length}`;
+  $('#osBody').innerHTML = rows.map(o => {
+    const e = S.eqById.get(o.equipamento_id), t = S.tecById.get(o.tecnico_id);
+    return `<tr data-os="${o.id}" title="${esc(o.titulo || '')}">
+      <td class="mono">${esc(o.numero || '—')}</td>
+      <td class="mono">${esc(e?.codigo || e?.nome || '—')}</td>
+      <td class="ell">${t ? esc(t.nome) : '<span class="muted">sem técnico</span>'}</td>
+      <td><span class="badge b-${o.status}">${esc(L.os[o.status] || o.status)}</span></td>
+      <td class="p-${o.prioridade}">${esc(L.prio[o.prioridade] || o.prioridade)}</td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty">Nenhuma ordem de serviço neste filtro.</td></tr>';
+}
+$('#osQ').addEventListener('input', e => { S.f.os.q = e.target.value; renderOS(); });
+$('#osSt').addEventListener('change', e => { S.f.os.status = e.target.value; renderOS(); });
+$('#osBody').addEventListener('click', e => { const tr = e.target.closest('tr[data-os]'); if (tr) openOS(tr.dataset.os); });
+$('#btnNewOS').addEventListener('click', () => openNewOS());
+
+function equipDatalist(extraId) {
+  const list = S.equips.filter(e => e.codigo && (e.status !== 'desativado' || e.id === extraId));
+  return `<datalist id="dlEq">${list.map(e => `<option value="${esc(e.codigo)}">${esc(e.nome)}</option>`).join('')}</datalist>`;
+}
+const tecOptions = cur => optList(S.tecnicos.filter(t => t.ativo || t.id === cur).map(t => [t.id, t.nome]), cur, '— sem técnico —');
+
+/* ---- editar / fechar OS ---- */
+async function openOS(id) {
+  const o = S.os.find(x => x.id === id); if (!o) return;
+  const e = S.eqById.get(o.equipamento_id);
+  const locked = !!o.confirmada_em && !S.admin;
+  const done = o.status === 'concluida';
+  const origEqText = e?.codigo || e?.nome || '';
+
+  // checklist da OS
+  let ck = [];
+  const {data: ce, error: ceErr} = await sb.from('checklist_execucao').select('id,checklist_plano_id,resultado,observacao').eq('ordem_servico_id', id);
+  if (ceErr) { toast(errMsg(ceErr), 'bad'); return; }
+  if (ce?.length) {
+    const {data: cp} = await sb.from('checklist_plano').select('id,descricao,ordem').in('id', ce.map(x => x.checklist_plano_id));
+    const m = new Map((cp || []).map(x => [x.id, x]));
+    ck = ce.map(x => ({...x, descricao: m.get(x.checklist_plano_id)?.descricao || '(item)', ordem: m.get(x.checklist_plano_id)?.ordem ?? 0}))
+           .sort((a, b) => a.ordem - b.ordem);
+  }
+
+  const dis = locked ? ' disabled' : '';
+  const body =
+    fld('Nº da ordem (não editável)', `<input id="o_num" value="${esc(o.numero)}" disabled class="mono">`) +
+    fld('Tipo', `<input value="${esc(L.tipo[o.tipo] || o.tipo)}" disabled>`) +
+    fld('Código do equipamento', `<input id="o_eq" list="dlEq" value="${esc(origEqText)}" autocomplete="off"${dis}>${equipDatalist(o.equipamento_id)}`,
+        {hint: e ? esc(e.nome) : ''}) +
+    fld('Técnico', `<select id="o_tec"${dis}>${tecOptions(o.tecnico_id)}</select>`) +
+    fld('Status', done ? `<input value="Concluída${o.confirmada_em ? ' · confirmada em ' + esc(fmtDT(o.confirmada_em)) : ''}" disabled>`
+                       : `<select id="o_st"${dis}>${optList([['aberta', 'Aberta'], ['em_execucao', 'Em execução']], o.status)}</select>`,
+        {hint: done ? '' : 'Para concluir use “Salvar e fechar OS”.'}) +
+    fld('Prioridade', `<select id="o_prio"${dis}>${optList(Object.entries(L.prio), o.prioridade)}</select>`) +
+    fld('Aberta em / limite', `<input value="${esc(fmtDT(o.data_abertura))} → ${esc(fmtDT(o.data_limite))}" disabled>`, {full: true}) +
+    fld('Título', `<input id="o_tit" value="${esc(o.titulo || '')}"${dis}>`, {full: true}) +
+    fld('Descrição', `<textarea id="o_desc"${dis}>${esc(o.descricao || '')}</textarea>`, {full: true}) +
+    fld('Serviço executado', `<textarea id="o_svc"${dis}>${esc(o.servico_executado || '')}</textarea>`, {full: true}) +
+    (ck.length ? `<div class="full"><label>Checklist (${ck.filter(c => c.resultado).length} de ${ck.length} respondidos)</label>` +
+      ck.map(c => `<div class="ck"><div class="d">${esc(c.descricao)}</div>
+        <select data-ck="${c.id}"${dis}>${optList(Object.entries(L.res), c.resultado, '—')}</select>
+        <input type="text" data-ckobs="${c.id}" placeholder="Observação" value="${esc(c.observacao || '')}"${dis}></div>`).join('') + '</div>' : '') +
+    (!done && !S.admin ? fld('PIN do técnico (necessário para fechar)', '<input id="o_pin" type="password" inputmode="numeric" autocomplete="off">') : '') +
+    (!done && S.admin ? '<div class="full hint muted">Administrador fecha a OS sem PIN (a OS precisa ter técnico e checklist completo).</div>' : '') +
+    (locked ? '<div class="warn full">OS confirmada: alterações bloqueadas. Somente o administrador pode reabrir.</div>' : '');
+
+  const save = async () => {
+    const txt = $('#o_eq').value.trim();
+    let eqId = o.equipamento_id;
+    if (txt !== origEqText) {
+      const ne = S.eqByCod.get(txt.toUpperCase());
+      if (!ne) throw new Error(`Equipamento “${txt}” não encontrado. Use um código existente.`);
+      eqId = ne.id;
+    }
+    const patch = {
+      equipamento_id: eqId, tecnico_id: $('#o_tec').value || null, prioridade: $('#o_prio').value,
+      titulo: nz($('#o_tit').value), descricao: nz($('#o_desc').value), servico_executado: nz($('#o_svc').value)
+    };
+    if (!done) patch.status = $('#o_st').value;
+    const {data, error} = await sb.from('ordem_servico').update(patch).eq('id', o.id).select('id');
+    if (error) throw error;
+    if (!data?.length) throw new Error('Nenhuma linha alterada: você não tem permissão para alterar esta OS (ela pertence a outro técnico).');
+    for (const c of ck) {
+      const r = nz($(`[data-ck="${c.id}"]`)?.value), ob = nz($(`[data-ckobs="${c.id}"]`)?.value);
+      if (r !== (c.resultado ?? null) || ob !== (c.observacao ?? null)) {
+        const {error: e2} = await sb.from('checklist_execucao').update({resultado: r, observacao: ob}).eq('id', c.id);
+        if (e2) throw e2;
+      }
+    }
+  };
+
+  const actions = [];
+  if (!locked) actions.push({label: 'Salvar', cls: 'pri', run: async () => { await save(); closeModal(); toast('OS salva.', 'good'); await loadAll(); }});
+  if (!locked && !done) actions.push({label: 'Salvar e fechar OS', cls: 'pri', run: async () => {
+    if (!confirm(`Fechar a OS ${o.numero}? Depois de confirmada, só o administrador pode reabrir.`)) return;
+    await save();
+    const {data, error} = await sb.rpc('confirmar_os', {p_os_id: o.id, p_pin: S.admin ? null : (nz($('#o_pin')?.value)), p_servico_executado: nz($('#o_svc').value)});
+    if (error) throw error;
+    if (!data?.ok) { await loadAll(); throw new Error(fechamentoErro(data)); }
+    closeModal();
+    toast('OS fechada' + (data.corretiva_id ? ' — foi aberta uma OS corretiva para os itens “Não OK”.' : '.'), 'good');
+    await loadAll();
+  }});
+  if (done && o.confirmada_em && S.admin) actions.push({label: 'Reabrir OS', cls: 'dan', run: async () => {
+    if (!confirm(`Reabrir a OS ${o.numero}? Ela volta para “Em execução”.`)) return;
+    const {data, error} = await sb.rpc('reabrir_os', {p_os_id: o.id});
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.erro === 'os_nao_confirmada' ? 'A OS não está confirmada.' : 'Sem permissão para reabrir.');
+    closeModal(); toast('OS reaberta.', 'good'); await loadAll();
+  }});
+  openModal({title: `Ordem de serviço ${o.numero}`, body, actions, wide: true});
+}
+
+function fechamentoErro(r) {
+  switch (r?.erro) {
+    case 'nao_autenticado': return 'Sessão expirada. Entre novamente.';
+    case 'os_nao_encontrada': return 'OS não encontrada.';
+    case 'ja_confirmada': return 'Esta OS já foi confirmada.';
+    case 'os_sem_tecnico': return 'Defina um técnico antes de fechar a OS.';
+    case 'usuario_sem_tecnico': return 'Seu usuário não está vinculado a um técnico.';
+    case 'os_de_outro_tecnico': return 'Esta OS pertence a outro técnico.';
+    case 'pin_nao_definido': return 'Você ainda não definiu um PIN de técnico.';
+    case 'pin_bloqueado': return 'PIN bloqueado até ' + fmtDT(r.bloqueado_ate) + '.';
+    case 'pin_incorreto': return `PIN incorreto. Tentativas restantes: ${r.tentativas_restantes ?? '—'}.`;
+    case 'checklist_incompleto': return `Checklist incompleto: faltam ${r.faltam} item(ns) para responder. As alterações foram salvas.`;
+    default: return 'Não foi possível fechar a OS: ' + (r?.erro || 'erro desconhecido');
+  }
+}
+
+/* ---- nova OS ---- */
+function openNewOS() {
+  const body =
+    fld('Código do equipamento *', `<input id="n_eq" list="dlEq" autocomplete="off" placeholder="digite o código">${equipDatalist()}`, {hint: '<span id="n_eqn"></span>'}) +
+    fld('Técnico', `<select id="n_tec">${tecOptions('')}</select>`) +
+    fld('Tipo *', `<select id="n_tipo">${optList(Object.entries(L.tipo), 'corretiva')}</select>`,
+        {hint: 'Preventiva usa o plano do grupo do equipamento (gera o checklist).'}) +
+    fld('Prioridade *', `<select id="n_prio">${optList(Object.entries(L.prio), 'media')}</select>`) +
+    fld('SLA (horas)', `<input id="n_sla" type="number" min="1" value="24">`) +
+    fld('Título', `<input id="n_tit" placeholder="se vazio, o banco gera automaticamente">`, {full: true}) +
+    fld('Descrição', `<textarea id="n_desc"></textarea>`, {full: true}) +
+    '<div class="full hint muted">O número da OS é gerado automaticamente pelo banco.</div>';
+  openModal({title: 'Nova ordem de serviço', body, actions: [{label: 'Abrir OS', cls: 'pri', run: async () => {
+    const eq = S.eqByCod.get($('#n_eq').value.trim().toUpperCase());
+    if (!eq) throw new Error('Informe um código de equipamento existente.');
+    const tipo = $('#n_tipo').value;
+    const plano = tipo === 'preventiva' ? S.calByEq.get(eq.id)?.plano_id : null;
+    const payload = {
+      equipamento_id: eq.id, tipo, status: 'aberta', prioridade: $('#n_prio').value,
+      tecnico_id: $('#n_tec').value || null, sla_horas: parseInt($('#n_sla').value, 10) || 24,
+      titulo: nz($('#n_tit').value), descricao: nz($('#n_desc').value), plano_id: plano
+    };
+    const {data, error} = await sb.from('ordem_servico').insert(payload).select('id,numero').single();
+    if (error) throw error;
+    closeModal();
+    toast(`OS ${data.numero} aberta.` + (tipo === 'preventiva' && !plano ? ' Atenção: o equipamento não tem plano ativo, então não há checklist.' : ''), 'good');
+    await loadAll();
+  }}]});
+  $('#n_eq').addEventListener('input', ev => { const e = S.eqByCod.get(ev.target.value.trim().toUpperCase()); $('#n_eqn').textContent = e ? e.nome : ''; });
+}
+
+/* ====================================================================
+   CALENDÁRIO (centro)
+   ==================================================================== */
+function calEvents() {
+  const c = S.f.cal, q = c.eq.trim().toLowerCase();
+  return S.cal.filter(e => c.st[e.status_manutencao] &&
+    (!c.grupo || e.grupo_id === c.grupo) &&
+    (!q || ((e.equipamento_codigo || '') + ' ' + (e.equipamento_nome || '')).toLowerCase().includes(q)) &&
+    (!c.de || dayKey(e.proxima_manutencao) >= c.de) && (!c.ate || dayKey(e.proxima_manutencao) <= c.ate));
+}
+
+function renderCal() {
+  const c = S.f.cal, y = c.month.getFullYear(), mo = c.month.getMonth();
+  const ttl = c.month.toLocaleDateString('pt-BR', {month: 'long', year: 'numeric'});
+  $('#calTitle').textContent = ttl.charAt(0).toUpperCase() + ttl.slice(1);
+  $('#calMonth').value = `${y}-${String(mo + 1).padStart(2, '0')}`;
+  const evs = calEvents(), by = new Map();
+  const tot = {atrasado: 0, proximo: 0, ok: 0};
+  evs.forEach(e => {
+    const k = dayKey(e.proxima_manutencao);
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push(e);
+    if (tot[e.status_manutencao] !== undefined) tot[e.status_manutencao]++;
+  });
+  $('#cntA').textContent = tot.atrasado; $('#cntP').textContent = tot.proximo; $('#cntO').textContent = tot.ok;
+  const start = new Date(y, mo, 1 - new Date(y, mo, 1).getDay()), today = iso(new Date());
+  let html = '';
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i), k = iso(d), list = by.get(k) || [];
+    const n = {atrasado: 0, proximo: 0, ok: 0};
+    list.forEach(e => { if (n[e.status_manutencao] !== undefined) n[e.status_manutencao]++; });
+    const dots = ['atrasado', 'proximo', 'ok'].filter(s => n[s])
+      .map(s => `<span class="dot ${s}" title="${n[s]} · ${L.cal[s]}">${n[s] > 1 ? n[s] : ''}</span>`).join('');
+    html += `<button type="button" class="day${d.getMonth() !== mo ? ' other' : ''}${k === today ? ' today' : ''}${c.sel === k ? ' sel' : ''}" data-day="${k}"><span class="n">${d.getDate()}</span><span class="dots">${dots}</span></button>`;
+  }
+  $('#calDays').innerHTML = html;
+  renderDayDetail(by);
+}
+
+function renderDayDetail(by) {
+  const k = S.f.cal.sel, box = $('#calDetail');
+  if (!k) { box.innerHTML = '<span class="muted">Clique em um dia para ver os equipamentos.</span>'; return; }
+  const order = {atrasado: 0, proximo: 1, ok: 2};
+  const list = (by.get(k) || []).slice().sort((a, b) => order[a.status_manutencao] - order[b.status_manutencao]);
+  const [yy, mm, dd] = k.split('-');
+  box.innerHTML = `<h4>${dd}/${mm}/${yy} — ${list.length} equipamento(s)</h4>` +
+    (list.map(e => `<div class="ev"><i class="lg lg-${e.status_manutencao}"></i>
+      <div class="t"><b class="mono">${esc(e.equipamento_codigo || '')}</b> ${esc(e.equipamento_nome || '')}<br><small>${esc(e.grupo_nome || '')} · a cada ${e.periodicidade_dias ?? '—'} dias · última: ${esc(fmtDate(e.ultima_manutencao))}</small></div>
+      <small>${esc(L.cal[e.status_manutencao] || '')}<br>${e.dias_restantes != null ? (e.dias_restantes < 0 ? Math.abs(e.dias_restantes) + ' d de atraso' : e.dias_restantes + ' d restantes') : ''}</small></div>`).join('')
+      || '<span class="muted">Nenhum vencimento neste dia (com os filtros atuais).</span>');
+}
+
+$('#calDays').addEventListener('click', e => {
+  const b = e.target.closest('[data-day]'); if (!b) return;
+  S.f.cal.sel = b.dataset.day;
+  const [y, m] = S.f.cal.sel.split('-').map(Number);
+  if (m - 1 !== S.f.cal.month.getMonth()) S.f.cal.month = new Date(y, m - 1, 1);
+  renderCal();
+});
+const moveMonth = n => { const m = S.f.cal.month; S.f.cal.month = new Date(m.getFullYear(), m.getMonth() + n, 1); renderCal(); };
+$('#calPrev').addEventListener('click', () => moveMonth(-1));
+$('#calNext').addEventListener('click', () => moveMonth(1));
+$('#calToday').addEventListener('click', () => { S.f.cal.month = firstOfMonth(); S.f.cal.sel = iso(new Date()); renderCal(); });
+$('#calMonth').addEventListener('change', e => { if (!e.target.value) return; const [y, m] = e.target.value.split('-').map(Number); S.f.cal.month = new Date(y, m - 1, 1); renderCal(); });
+$('#calOld').addEventListener('click', () => {
+  const old = calEvents().filter(e => e.status_manutencao === 'atrasado').map(e => dayKey(e.proxima_manutencao)).sort()[0];
+  if (!old) { toast('Nenhum equipamento vencido com os filtros atuais.'); return; }
+  const [y, m] = old.split('-').map(Number); S.f.cal.month = new Date(y, m - 1, 1); S.f.cal.sel = old; renderCal();
+});
+$('#calGrp').addEventListener('change', e => { S.f.cal.grupo = e.target.value; renderCal(); });
+$('#calEq').addEventListener('input', e => { S.f.cal.eq = e.target.value; renderCal(); });
+$('#calDe').addEventListener('change', e => { S.f.cal.de = e.target.value; if (e.target.value) { const [y, m] = e.target.value.split('-').map(Number); S.f.cal.month = new Date(y, m - 1, 1); } renderCal(); });
+$('#calAte').addEventListener('change', e => { S.f.cal.ate = e.target.value; renderCal(); });
+[['#calA', 'atrasado'], ['#calP', 'proximo'], ['#calO', 'ok']].forEach(([id, k]) => $(id).addEventListener('change', e => { S.f.cal.st[k] = e.target.checked; renderCal(); }));
+$('#calClr').addEventListener('click', () => {
+  Object.assign(S.f.cal, {st: {atrasado: true, proximo: true, ok: true}, grupo: '', eq: '', de: '', ate: ''});
+  $('#calGrp').value = ''; $('#calEq').value = ''; $('#calDe').value = ''; $('#calAte').value = '';
+  ['#calA', '#calP', '#calO'].forEach(i => $(i).checked = true); renderCal();
+});
+
+/* ====================================================================
+   GRUPOS E EQUIPAMENTOS (direita, em cima)
+   ==================================================================== */
+function renderGroups() {
+  const q = $('#grpQ').value.trim().toLowerCase();
+  const rows = S.edGrupos.filter(g => !q || (g.grupo_nome + ' ' + (g.codigo_base || '')).toLowerCase().includes(q));
+  $('#grpBody').innerHTML = rows.map(g => `<tr data-g="${g.grupo_id}" class="${S.selGrupo === g.grupo_id ? 'sel' : ''}">
+    <td>${esc(g.grupo_nome)}</td><td class="mono">${esc(g.codigo_base || '')}</td>
+    <td class="num">${g.qtd_equipamentos ?? 0}</td><td class="num">${g.periodicidade_dias ?? '—'}</td><td class="num">${g.qtd_itens_checklist ?? '—'}</td>
+    <td class="act">${S.admin ? `<button class="ib" data-editg="${g.grupo_id}" title="Editar grupo" type="button">✎</button>` : ''}</td></tr>`).join('')
+    || '<tr><td colspan="6" class="empty">Nenhum grupo.</td></tr>';
+}
+function renderEquips() {
+  const g = S.edGrupos.find(x => x.grupo_id === S.selGrupo);
+  $('#eqTitle').textContent = g ? `Equipamentos — ${g.grupo_nome}` : 'Equipamentos (selecione um grupo)';
+  $('#eqBody').innerHTML = g ? (S.edEquips.map(e => `<tr data-e="${e.equipamento_id}">
+    <td class="mono">${esc(e.codigo || '')}</td><td class="ell" style="max-width:170px" title="${esc(e.nome)}">${esc(e.nome)}</td>
+    <td><span class="badge b-${e.status}">${esc(L.eq[e.status] || e.status)}</span></td>
+    <td class="num" title="${e.periodicidade_propria_dias ? 'periodicidade própria' : 'periodicidade do grupo'}">${e.periodicidade_propria_dias ? e.periodicidade_propria_dias + '*' : (e.periodicidade_grupo_dias ?? '—')}</td>
+    <td class="act">${S.admin ? `<button class="ib" data-edite="${e.equipamento_id}" title="Editar equipamento" type="button">✎</button>` : ''}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="empty">Grupo sem equipamentos.</td></tr>')
+    : '<tr><td colspan="5" class="empty">Clique em um grupo acima.</td></tr>';
+}
+async function loadEquips(gid) {
+  if (!S.admin) {   // modo leitura (a função do banco exige admin)
+    S.edEquips = S.equips.filter(e => e.grupo_id === gid && e.status !== 'desativado').map(e => ({
+      equipamento_id: e.id, codigo: e.codigo, nome: e.nome, status: e.status, periodicidade_grupo_dias: null, periodicidade_propria_dias: null}));
+    renderEquips(); return;
+  }
+  const {data, error} = await sb.rpc('editor_listar_equipamentos', {p_grupo_id: gid});
+  if (error) { toast(errMsg(error), 'bad'); return; }
+  S.edEquips = (data || []).sort((a, b) => (a.codigo || '').localeCompare(b.codigo || '', 'pt-BR', {numeric: true}));
+  renderEquips();
+}
+$('#grpQ').addEventListener('input', renderGroups);
+$('#grpBody').addEventListener('click', async e => {
+  const ed = e.target.closest('[data-editg]');
+  if (ed) { e.stopPropagation(); openGrupo(ed.dataset.editg); return; }
+  const tr = e.target.closest('tr[data-g]'); if (!tr) return;
+  S.selGrupo = tr.dataset.g; renderGroups(); await loadEquips(S.selGrupo);
+});
+$('#eqBody').addEventListener('click', e => {
+  const b = e.target.closest('[data-edite]');
+  if (b) { openEquip(b.dataset.edite); return; }
+  const tr = e.target.closest('tr[data-e]'); if (tr && S.admin) openEquip(tr.dataset.e);
+});
+$('#btnNewG').addEventListener('click', () => openGrupo(null));
+$('#btnNewE').addEventListener('click', () => openEquip(null));
+
+const simText = r => {
+  if (!r) return '';
+  if (!r.ok) return r.motivo || 'Não foi possível simular.';
+  if ('equipamentos_afetados' in r) return `Equipamentos afetados: ${r.equipamentos_afetados} · atrasados antes → depois: ${r.atrasados_antes} → ${r.atrasados_depois} · próxima manutenção mais cedo: ${fmtDate(r.proxima_mais_cedo)}`;
+  return `Próxima manutenção: ${fmtDate(r.proxima_manutencao)} · status ${L.cal[r.status_antes] || r.status_antes} → ${L.cal[r.status_depois] || r.status_depois}`;
+};
+
+/* ---- grupo ---- */
+function openGrupo(id) {
+  const g = id ? S.grpById.get(id) : null, ed = id ? S.edGrupos.find(x => x.grupo_id === id) : null;
+  const body =
+    fld('Nome *', `<input id="g_nome" value="${esc(g?.nome || '')}">`) +
+    fld('Código base', `<input id="g_cod" value="${esc(g?.codigo_base || '')}">`) +
+    fld('Descrição', `<textarea id="g_desc">${esc(g?.descricao || '')}</textarea>`, {full: true}) +
+    `<div class="full chk"><input type="checkbox" id="g_ativo"${(g?.ativo ?? true) ? ' checked' : ''}><label for="g_ativo">Grupo ativo</label></div>` +
+    (ed?.plano_id ? fld('Periodicidade do plano (dias, 1–365)', `<input id="g_dias" type="number" min="1" max="365" value="${ed.periodicidade_dias ?? ''}">`, {hint: esc(ed.plano_nome || '')}) +
+      fld('Início da contagem', `<input id="g_ini" type="date" value="${esc(ed.data_inicio_contagem || '')}">`) +
+      '<div class="full"><button type="button" class="btn" id="g_sim">Simular efeito da periodicidade</button><div class="hint" id="simOut"></div></div>'
+      : (id ? '<div class="full hint muted">Este grupo não tem plano de manutenção ativo, então não há periodicidade para editar aqui.</div>' : '<div class="full hint muted">Ao criar o grupo, o plano de manutenção/periodicidade continua sendo definido como você já faz hoje no GestorPCM.</div>'));
+  openModal({title: id ? `Editar grupo — ${g?.nome}` : 'Novo grupo', body, actions: [{label: 'Salvar', cls: 'pri', run: async () => {
+    const nome = nz($('#g_nome').value); if (!nome) throw new Error('Informe o nome do grupo.');
+    const f = {nome, codigo_base: nz($('#g_cod').value), descricao: nz($('#g_desc').value), ativo: $('#g_ativo').checked};
+    if (id) {
+      const {data, error} = await sb.from('grupo_equipamento').update(f).eq('id', id).select('id');
+      if (error) throw error;
+      if (!data?.length) throw new Error('Nenhuma linha alterada: somente administradores editam grupos.');
+      if (ed?.plano_id) {
+        const dias = parseInt($('#g_dias').value, 10), ini = $('#g_ini').value || null;
+        if (dias !== ed.periodicidade_dias || (ini || null) !== (ed.data_inicio_contagem || null)) {
+          const {data: r, error: e2} = await sb.rpc('editor_salvar_periodicidade_grupo', {p_plano_id: ed.plano_id, p_dias: dias, p_data_inicio: ini, p_aplicar: true});
+          if (e2) throw e2; if (!r?.ok) throw new Error(r?.motivo || 'Periodicidade não aplicada.');
+        }
+      }
+    } else {
+      const {error} = await sb.from('grupo_equipamento').insert(f); if (error) throw error;
+    }
+    closeModal(); toast('Grupo salvo.', 'good'); await loadAll();
+  }}]});
+  const sim = $('#g_sim');
+  if (sim) sim.addEventListener('click', async () => {
+    const {data, error} = await sb.rpc('editor_salvar_periodicidade_grupo', {p_plano_id: ed.plano_id, p_dias: parseInt($('#g_dias').value, 10), p_data_inicio: $('#g_ini').value || null, p_aplicar: false});
+    $('#simOut').textContent = error ? errMsg(error) : simText(data);
+  });
+}
+
+/* ---- equipamento ---- */
+function openEquip(id) {
+  const e = id ? S.eqById.get(id) : null, row = id ? S.edEquips.find(x => x.equipamento_id === id) : null;
+  const gid = e?.grupo_id ?? S.selGrupo ?? '';
+  const body =
+    fld('Código', `<input id="e_cod" value="${esc(e?.codigo || '')}" class="mono">`, {hint: 'Único no banco.'}) +
+    fld('Nome *', `<input id="e_nome" value="${esc(e?.nome || '')}">`) +
+    fld('Grupo', `<select id="e_grp">${optList(S.grupos.filter(g => g.ativo || g.id === gid).map(g => [g.id, g.nome]), gid, '— sem grupo —')}</select>`) +
+    fld('Status', `<select id="e_st">${optList(Object.entries(L.eq), e?.status || 'operando')}</select>`) +
+    fld('Criticidade', `<select id="e_cr">${optList(Object.entries(L.crit), e?.criticidade || 'media', '—')}</select>`) +
+    fld('Fabricante', `<input id="e_fab" value="${esc(e?.fabricante || '')}">`) +
+    fld('Modelo', `<input id="e_mod" value="${esc(e?.modelo || '')}">`) +
+    fld('Nº de série', `<input id="e_ser" value="${esc(e?.numero_serie || '')}">`) +
+    fld('Descrição', `<textarea id="e_desc">${esc(e?.descricao || '')}</textarea>`, {full: true}) +
+    `<div class="full chk"><input type="checkbox" id="e_geral"${e?.geral ? ' checked' : ''}><label for="e_geral">Código geral (mão de obra do grupo/serviço — não é máquina, não gera OS preventiva automática)</label></div>` +
+    (id ? fld('Periodicidade própria (dias, 1–365)', `<input id="e_dias" type="number" min="1" max="365" value="${row?.periodicidade_propria_dias ?? ''}">`, {hint: `Vazio = usa a do grupo (${row?.periodicidade_grupo_dias ?? '—'} dias).`}) +
+      fld('Observação da periodicidade', `<input id="e_obs" value="${esc(row?.observacao_periodicidade || '')}">`) +
+      '<div class="full"><button type="button" class="btn" id="e_sim">Simular periodicidade</button><div class="hint" id="simOut"></div></div>' : '');
+  openModal({title: id ? `Editar equipamento — ${e?.codigo || e?.nome}` : 'Novo equipamento', wide: true, body, actions: [{label: 'Salvar', cls: 'pri', run: async () => {
+    const nome = nz($('#e_nome').value); if (!nome) throw new Error('Informe o nome do equipamento.');
+    const f = {codigo: nz($('#e_cod').value), nome, grupo_id: $('#e_grp').value || null, status: $('#e_st').value, criticidade: $('#e_cr').value || null,
+      fabricante: nz($('#e_fab').value), modelo: nz($('#e_mod').value), numero_serie: nz($('#e_ser').value), descricao: nz($('#e_desc').value), geral: $('#e_geral').checked};
+    let aviso = '';
+    if (id) {
+      const {data, error} = await sb.from('equipamento').update(f).eq('id', id).select('id');
+      if (error) throw error;
+      if (!data?.length) throw new Error('Nenhuma linha alterada: somente administradores editam equipamentos.');
+      const d = $('#e_dias').value === '' ? null : parseInt($('#e_dias').value, 10), ob = nz($('#e_obs').value);
+      if (d !== (row?.periodicidade_propria_dias ?? null) || (d !== null && ob !== (row?.observacao_periodicidade ?? null))) {
+        const {data: r, error: e2} = await sb.rpc('editor_salvar_periodicidade_equipamento', {p_equipamento_id: id, p_dias: d, p_observacao: ob, p_aplicar: true});
+        if (e2) throw e2; if (!r?.ok) aviso = ' Periodicidade não aplicada: ' + (r?.motivo || '');
+      }
+    } else {
+      const {error} = await sb.from('equipamento').insert(f); if (error) throw error;
+    }
+    closeModal(); toast('Equipamento salvo.' + aviso, aviso ? '' : 'good'); await loadAll();
+  }}]});
+  const sim = $('#e_sim');
+  if (sim) sim.addEventListener('click', async () => {
+    const d = $('#e_dias').value === '' ? null : parseInt($('#e_dias').value, 10);
+    const {data, error} = await sb.rpc('editor_salvar_periodicidade_equipamento', {p_equipamento_id: id, p_dias: d, p_observacao: nz($('#e_obs').value), p_aplicar: false});
+    $('#simOut').textContent = error ? errMsg(error) : simText(data);
+  });
+}
+
+/* ====================================================================
+   INDICADORES (direita, embaixo)
+   ==================================================================== */
+const inRange = (v, de, ate) => { if (!v) return false; const k = dayKey(v); return (!de || k >= de) && (!ate || k <= ate); };
+const minutesBetween = (a, b) => { if (!a || !b) return 0; const [h1, m1] = a.split(':').map(Number), [h2, m2] = b.split(':').map(Number); return Math.max(0, (h2 * 60 + m2) - (h1 * 60 + m1)); };
+
+function renderProd() {
+  const p = S.f.prod;
+  const okEq = id => !p.grupo || S.eqById.get(id)?.grupo_id === p.grupo;
+  const okTec = id => !p.tec || id === p.tec;
+  const done = S.os.filter(o => o.status === 'concluida' && inRange(o.data_conclusao, p.de, p.ate) && okEq(o.equipamento_id) && okTec(o.tecnico_id));
+  const opened = S.os.filter(o => inRange(o.data_abertura, p.de, p.ate) && okEq(o.equipamento_id) && okTec(o.tecnico_id));
+  const backlog = S.os.filter(o => o.status !== 'concluida' && okEq(o.equipamento_id) && okTec(o.tecnico_id));
+  const regs = S.regs.filter(r => r.data_servico && (!p.de || r.data_servico >= p.de) && (!p.ate || r.data_servico <= p.ate) && okEq(r.equipamento_id) && okTec(r.tecnico_id));
+  const horas = regs.reduce((s, r) => s + minutesBetween(r.hora_inicio, r.hora_fim), 0) / 60;
+  $('#pKpis').innerHTML = [
+    [done.length, 'OS concluídas'], [done.filter(o => o.tipo === 'preventiva').length, 'Preventivas concl.'],
+    [done.filter(o => o.tipo === 'corretiva').length, 'Corretivas concl.'], [opened.length, 'OS abertas no período'],
+    [backlog.length, 'Em aberto agora'], [nf1(horas), 'Horas registradas']
+  ].map(([v, t]) => `<div class="kpi"><b>${v}</b><span>${t}</span></div>`).join('');
+  const by = new Map();
+  const get = id => { if (!by.has(id)) by.set(id, {n: 0, prev: 0, corr: 0, min: 0}); return by.get(id); };
+  done.forEach(o => { const r = get(o.tecnico_id); r.n++; if (o.tipo === 'preventiva') r.prev++; if (o.tipo === 'corretiva') r.corr++; });
+  regs.forEach(r => { get(r.tecnico_id).min += minutesBetween(r.hora_inicio, r.hora_fim); });
+  const rows = [...by.entries()].sort((a, b) => b[1].min - a[1].min || b[1].n - a[1].n);
+  const max = Math.max(1, ...rows.map(r => r[1].min));
+  $('#pBody').innerHTML = rows.map(([id, r]) => `<tr style="cursor:default"><td>${esc(S.tecById.get(id)?.nome || '—')}</td><td class="num">${r.n}</td><td class="num">${r.prev}</td><td class="num">${r.corr}</td><td class="num">${nf1(r.min / 60)}</td><td style="width:70px"><div class="bar"><i style="width:${Math.round(100 * r.min / max)}%"></i></div></td></tr>`).join('')
+    || '<tr><td colspan="6" class="empty" style="cursor:default">Sem atividade no período/filtros.</td></tr>';
+}
+
+function renderMM() {
+  const m = S.f.mm, q = m.eq.trim().toLowerCase();
+  const rows = S.os.filter(o => {
+    if (o.tipo !== 'corretiva' || o.status !== 'concluida' || !inRange(o.data_abertura, m.de, m.ate)) return false;
+    const e = S.eqById.get(o.equipamento_id);
+    if (m.grupo && e?.grupo_id !== m.grupo) return false;
+    return !q || ((e?.codigo || '') + ' ' + (e?.nome || '')).toLowerCase().includes(q);
+  });
+  const by = new Map();
+  rows.forEach(o => { if (!by.has(o.equipamento_id)) by.set(o.equipamento_id, []); by.get(o.equipamento_id).push(o); });
+  const dur = o => o.tempo_gasto_minutos ?? (o.data_conclusao ? (new Date(o.data_conclusao) - new Date(o.data_abertura)) / 60000 : null);
+  const allDur = [], allGap = [], list = [];
+  by.forEach((arr, id) => {
+    arr.sort((a, b) => new Date(a.data_abertura) - new Date(b.data_abertura));
+    const ds = arr.map(dur).filter(v => v != null);
+    const gaps = arr.slice(1).map((o, i) => (new Date(o.data_abertura) - new Date(arr[i].data_abertura)) / 86400000);
+    allDur.push(...ds); allGap.push(...gaps);
+    const avg = a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
+    list.push({id, n: arr.length, mttr: avg(ds) == null ? null : avg(ds) / 60, mtbf: avg(gaps)});
+  });
+  const avg = a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
+  const gm = avg(allDur), gb = avg(allGap);
+  $('#mKpis').innerHTML = [
+    [rows.length, 'Corretivas concluídas'], [by.size, 'Equipamentos com falha'],
+    [gm == null ? '—' : nf1(gm / 60), 'MTTR médio (horas)'], [gb == null ? '—' : nf1(gb), 'MTBF médio (dias)']
+  ].map(([v, t]) => `<div class="kpi"><b>${v}</b><span>${t}</span></div>`).join('');
+  list.sort((a, b) => b.n - a.n || (S.eqById.get(a.id)?.codigo || '').localeCompare(S.eqById.get(b.id)?.codigo || '', 'pt-BR', {numeric: true}));
+  $('#mBody').innerHTML = list.map(r => {
+    const e = S.eqById.get(r.id);
+    return `<tr style="cursor:default"><td><b class="mono">${esc(e?.codigo || '')}</b> <span class="muted">${esc(e?.nome || '')}</span></td><td class="num">${r.n}</td><td class="num">${nf1(r.mttr)}</td><td class="num" title="${r.mtbf == null ? 'Precisa de 2 ou mais falhas' : ''}">${nf1(r.mtbf)}</td></tr>`;
+  }).join('') || '<tr><td colspan="4" class="empty" style="cursor:default">Nenhuma OS corretiva concluída neste filtro.</td></tr>';
+}
+
+/* filtros dos indicadores */
+const bind = (id, obj, key, fn) => { const el = $(id); el.value = obj[key] ?? ''; el.addEventListener('input', e => { obj[key] = e.target.value; fn(); }); };
+bind('#pDe', S.f.prod, 'de', renderProd); bind('#pAte', S.f.prod, 'ate', renderProd);
+bind('#pTec', S.f.prod, 'tec', renderProd); bind('#pGrp', S.f.prod, 'grupo', renderProd);
+bind('#mDe', S.f.mm, 'de', renderMM); bind('#mAte', S.f.mm, 'ate', renderMM);
+bind('#mGrp', S.f.mm, 'grupo', renderMM); bind('#mEq', S.f.mm, 'eq', renderMM);
+$$('.tabs button').forEach(b => b.addEventListener('click', () => {
+  $$('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  $('#tabProd').hidden = b.dataset.tab !== 'prod'; $('#tabMM').hidden = b.dataset.tab !== 'mm';
+}));
+
+/* ---------- modal: fechar ---------- */
+$('#dlgX').addEventListener('click', closeModal);
+
+boot();
+</script>
+</body>
+</html>
