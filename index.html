@@ -814,7 +814,6 @@ function openNewOS(pre = {}) {
     fld('Tipo *', `<select id="n_tipo">${optList(Object.entries(L.tipo), pe ? 'preventiva' : 'corretiva')}</select>`,
         {hint: 'Preventiva usa o plano do grupo do equipamento (gera o checklist).'}) +
     fld('Prioridade *', `<select id="n_prio">${optList(Object.entries(L.prio), pe ? 'baixa' : 'media')}</select>`) +
-    fld('SLA (horas)', `<input id="n_sla" type="number" min="1" value="24">`) +
     fld('Título', `<input id="n_tit" placeholder="se vazio, o banco gera automaticamente" value="${esc(planoPre?.nome || '')}">`, {full: true}) +
     fld('Descrição técnica', `<textarea id="n_desc">${pe ? 'PREVENTIVA' : ''}</textarea>`, {full: true}) +
     (pe && !planoPre ? '<div class="warn full">Este equipamento não tem plano de manutenção ativo: a OS será aberta sem plano e sem checklist.</div>' : '') +
@@ -828,7 +827,7 @@ function openNewOS(pre = {}) {
     if (dup) throw new Error(`Já existe a OS ${dup.numero} (${L.os[dup.status]}) para este equipamento e plano. Conclua essa OS antes de abrir outra.`);
     const payload = {
       equipamento_id: eq.id, tipo, status: 'aberta', prioridade: $('#n_prio').value,
-      tecnico_id: $('#n_tec').value || null, sla_horas: parseInt($('#n_sla').value, 10) || 24,
+      tecnico_id: $('#n_tec').value || null,   // sla_horas não é enviado: o banco aplica o padrão (24 h) e calcula data_limite
       titulo: nz($('#n_tit').value), descricao: nz($('#n_desc').value), plano_id: plano
     };
     const {data, error} = await sb.from('ordem_servico').insert(payload).select('id,numero').single();
