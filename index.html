@@ -76,6 +76,7 @@ td.empty{text-align:center;color:var(--muted);padding:22px;cursor:default}
 .b-operando{background:#dcfce7;color:#15803d}
 .b-em_manutencao{background:#ffedd5;color:#c2410c}
 .b-parado_com_defeito{background:#fee2e2;color:#b91c1c}
+.b-cancelada{background:#e2e8f0;color:#475569}
 .b-desativado{background:#e2e8f0;color:#475569}
 .p-urgente{color:var(--red);font-weight:700}
 .p-alta{color:var(--orange);font-weight:700}
@@ -184,6 +185,13 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
   .split{grid-template-columns:1fr}
   .half + .half{border-left:0;border-top:1px solid var(--line)}
 }
+.pcell{width:34px;text-align:center;padding:0 4px}
+.pbtn{border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer;font-size:13px;line-height:1;padding:3px 6px}
+.pbtn:hover{background:#f1f5f9}
+.ncitem{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff}
+.ncitem .h{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+.ncitem .ac{display:flex;gap:8px;margin-top:8px}
+.ncn{display:inline-block;min-width:18px;border-radius:999px;background:var(--red);color:#fff;font-size:11px;padding:0 6px;margin-left:4px}
 </style>
 </head>
 <body>
@@ -210,6 +218,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
     <span class="sp"></span>
     <span id="busy" hidden>Carregando…</span>
     <span class="chip" id="userChip"></span>
+    <button class="btn" id="btnNC" type="button" title="Itens do checklist marcados como Não OK">⚠ Não conformidades<span class="ncn" id="ncN" hidden></span></button>
     <button class="btn" id="btnReload" type="button">↻ Atualizar</button>
     <button class="btn" id="btnOut" type="button">Sair</button>
   </header>
@@ -248,7 +257,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
           <div class="halfh">Ordens de serviço <span class="muted" style="font-weight:400">· passe o cursor sobre uma OS</span></div>
           <div class="pb">
             <table>
-              <thead><tr><th>Nº</th><th>Equip.</th><th>Técnico</th><th>Status</th></tr></thead>
+              <thead><tr><th>Nº</th><th>Equip.</th><th>Técnico</th><th>Status</th><th></th></tr></thead>
               <tbody id="osBody"></tbody>
             </table>
           </div>
@@ -542,7 +551,7 @@ async function fetchAll(table, select, orderCol) {
 async function loadAll() {
   setBusy(true);
   try {
-    const [tec, eq, gr, os, cal, regs, regd, planos, edg] = await Promise.all([
+    const [tec, eq, gr, os, cal, regs, regd, planos, edg, ncs] = await Promise.all([
       // toda leitura paginada precisa de ordem estável (senão, acima de 1000 linhas, o banco pode repetir ou pular registros)
       fetchAll('tecnico', 'id,nome,matricula,ativo,regime', 'id'),
       fetchAll('equipamento', 'id,codigo,nome,descricao,grupo_id,localizacao_id,fabricante,modelo,numero_serie,status,criticidade,geral', 'id'),
@@ -553,7 +562,8 @@ async function loadAll() {
       fetchAll('vw_registro_manutencao_detalhado', 'data,inicio,fim,tempo,tecnico,equipamento_codigo,equipamento,grupo,ordem_servico,tipo,descricao', ['data', 'inicio', 'equipamento_codigo', 'tecnico']),
       fetchAll('plano_manutencao', 'id,codigo,nome,grupo_id,periodicidade_dias,ativo', 'id'),
       // as funções editor_* exigem perfil admin no banco; técnicos usam um modo leitura montado a partir das tabelas
-      S.admin ? sb.rpc('editor_listar_grupos') : Promise.resolve({data: null, error: null})
+      S.admin ? sb.rpc('editor_listar_grupos') : Promise.resolve({data: null, error: null}),
+      fetchAll('nao_conformidade', 'id,ordem_servico_id,equipamento_id,descricao,status,os_corretiva_id,criado_em,decidido_em', 'id').catch(() => [])
     ]);
     if (edg.error) throw edg.error;
     S.tecnicos = tec.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
@@ -568,6 +578,7 @@ async function loadAll() {
     S.calByEq = new Map(cal.map(e => [e.equipamento_id, e]));
     S.regs = regs;
     S.regd = regd;
+    S.ncs = ncs;
     S.planoById = new Map(planos.map(p => [p.id, p]));
     S.edGrupos = S.admin
       ? (edg.data || [])
@@ -578,6 +589,7 @@ async function loadAll() {
     S.edGrupos.sort((a, b) => a.grupo_nome.localeCompare(b.grupo_nome, 'pt-BR'));
     fillSelects();
     renderAll();
+    renderNC();
     if (S.selGrupo) await loadEquips(S.selGrupo, false);
   } finally { setBusy(false); }
 }
@@ -588,6 +600,41 @@ function fillSelects() {
   const el = $('#pTec'), v = el.value;
   el.innerHTML = optList(S.tecnicos.map(t => [t.id, t.nome]), '', 'Todos os técnicos'); el.value = v;
 }
+
+/* ---- não conformidades (itens do checklist marcados “Não OK”) ---- */
+function renderNC() {
+  const pend = (S.ncs || []).filter(n => n.status === 'pendente');
+  const b = $('#ncN'); b.textContent = pend.length; b.hidden = !pend.length;
+  if ($('#dlg').open && $('#dlgTitle').textContent === 'Não conformidades') openNC();   // mantém a janela atualizada após decidir
+}
+function openNC() {
+  const nome = id => S.os.find(o => o.id === id)?.numero || '—';
+  const cod = id => S.eqById.get(id)?.codigo || S.eqById.get(id)?.nome || '—';
+  const all = (S.ncs || []).slice().sort((a, b) => new Date(b.criado_em) - new Date(a.criado_em));
+  const pend = all.filter(n => n.status === 'pendente'), dec = all.filter(n => n.status !== 'pendente').slice(0, 10);
+  const card = (n, acoes) => `<div class="ncitem"><div class="h"><b class="mono">OS ${esc(nome(n.ordem_servico_id))}</b><b class="mono">${esc(cod(n.equipamento_id))}</b><span class="muted">${esc(fmtDT(n.criado_em))}</span>${n.status === 'pendente' ? '' : `<span class="badge b-${n.status === 'confirmada' ? 'concluida' : 'cancelada'}">${n.status === 'confirmada' ? 'Confirmada' : 'Descartada'}</span>`}${n.os_corretiva_id ? `<span class="muted">→ OS corretiva ${esc(nome(n.os_corretiva_id))}</span>` : ''}</div><div>${esc(n.descricao)}</div>${acoes}</div>`;
+  const body =
+    (pend.length ? pend.map(n => card(n, S.admin ? `<div class="ac"><button type="button" class="btn pri" data-ncok="${n.id}">Confirmar → abrir OS corretiva</button><button type="button" class="btn dan" data-ncno="${n.id}">Descartar</button></div>` : '')).join('')
+      : '<div class="empty">Nenhuma não conformidade pendente.</div>') +
+    (S.admin ? '' : '<div class="hint muted">Somente o administrador confirma ou descarta.</div>') +
+    (dec.length ? '<h4 style="margin:14px 0 6px">Últimas decididas</h4>' + dec.map(n => card(n, '')).join('') : '');
+  openModal({title: 'Não conformidades', body, actions: [], wide: true});
+}
+$('#btnNC').addEventListener('click', openNC);
+$('#dlgBody').addEventListener('click', async e => {
+  const ok = e.target.closest('[data-ncok]'), no = e.target.closest('[data-ncno]');
+  if (!ok && !no) return;
+  const id = (ok || no).dataset.ncok || (ok || no).dataset.ncno;
+  if (ok && !confirm('Confirmar esta não conformidade? O banco vai abrir uma OS corretiva para o equipamento.')) return;
+  if (no && !confirm('Descartar esta não conformidade? Nenhuma OS será aberta.')) return;
+  (ok || no).disabled = true;
+  try {
+    const {error} = await sb.rpc(ok ? 'confirmar_nao_conformidade' : 'descartar_nao_conformidade', {p_id: id});
+    if (error) throw error;
+    toast(ok ? 'OS corretiva aberta.' : 'Não conformidade descartada.', 'good');
+    await loadAll();
+  } catch (err) { (ok || no).disabled = false; showErr(err); }
+});
 
 function renderAll() { renderOS(); renderRegs(); renderCal(); renderGroups(); renderEquips(); renderProd(); renderMM(); }
 
@@ -618,8 +665,9 @@ function renderOS() {
       <td class="mono">${esc(o.numero || '—')}</td>
       <td class="mono">${esc(e?.codigo || e?.nome || '—')}</td>
       <td class="ell">${t ? esc(t.nome) : '<span class="muted">sem técnico</span>'}</td>
-      <td><span class="badge b-${o.status}">${esc(L.os[o.status] || o.status)}</span></td></tr>`;
-  }).join('') || '<tr><td colspan="4" class="empty">Nenhuma ordem de serviço neste filtro.</td></tr>';
+      <td><span class="badge b-${o.status}">${esc(L.os[o.status] || o.status)}</span></td>
+      <td class="pcell"><button type="button" class="pbtn" data-print="${esc(o.numero || '')}" title="Imprimir OS ${esc(o.numero || '')}">🖨</button></td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty">Nenhuma ordem de serviço neste filtro.</td></tr>';
 }
 
 /* ---- registros de manutenção da OS sob o cursor (view vw_registro_manutencao_detalhado) ---- */
@@ -691,7 +739,15 @@ $('#osPrev').addEventListener('click', () => shiftPeriod(-1));
 $('#osNext').addEventListener('click', () => shiftPeriod(1));
 $('#osToday').addEventListener('click', () => { S.f.os.ref = iso(new Date()); $('#osRef').value = S.f.os.ref; renderOS(); renderRegs(); });
 $('#osBody').addEventListener('mouseover', e => { const tr = e.target.closest('tr[data-os]'); if (tr) showRegs(tr.dataset.os); });
-$('#osBody').addEventListener('click', e => { const tr = e.target.closest('tr[data-os]'); if (tr) openOS(tr.dataset.os); });
+$('#osBody').addEventListener('click', e => {
+  const pb = e.target.closest('[data-print]');
+  if (pb) {   // imprimir sem abrir a OS; a aba abre já no clique para o navegador não bloquear
+    e.stopPropagation();
+    const win = window.open('', '_blank');
+    printOS(pb.dataset.print, win).catch(err => toast(err.message || String(err), 'bad'));
+    return;
+  }
+  const tr = e.target.closest('tr[data-os]'); if (tr) openOS(tr.dataset.os); });
 $('#btnNewOS').addEventListener('click', () => openNewOS());
 
 function equipDatalist(extraId) {
