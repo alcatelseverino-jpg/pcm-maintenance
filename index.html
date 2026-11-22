@@ -336,10 +336,11 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
           </div>
           <div class="kpis" id="pKpis"></div>
           <table>
-            <thead><tr><th>Técnico</th><th class="num">OS conc.</th><th class="num">Prev.</th><th class="num">Corr.</th><th class="num">Horas</th><th></th></tr></thead>
+            <thead><tr><th>Técnico</th><th class="num" title="OS concluídas no período (pela data de conclusão)">OS conc.</th><th class="num" title="Registros de manutenção lançados no período (com ou sem OS)">Regist.</th><th class="num">Horas</th><th class="num" title="Horas dos registros do tipo preventiva">H. prev.</th><th class="num" title="Horas dos registros do tipo corretiva">H. corr.</th><th></th></tr></thead>
             <tbody id="pBody"></tbody>
           </table>
-          <div class="note">Horas = soma de (hora fim − hora início) dos registros de manutenção no período. OS concluídas = pela data de conclusão. “Em aberto agora” não depende do período.</div>
+          <div class="note">Horas = soma de (hora fim − hora início) dos registros de manutenção no período; horas preventivas/corretivas seguem o tipo do registro. OS concluídas = pela data de conclusão. “Em aberto agora” não depende do período.</div>
+          <div class="note" id="pNote"></div>
         </div>
         <div id="tabMM" class="pb" hidden>
           <div class="sub">
@@ -542,14 +543,15 @@ async function loadAll() {
   setBusy(true);
   try {
     const [tec, eq, gr, os, cal, regs, regd, planos, edg] = await Promise.all([
-      fetchAll('tecnico', 'id,nome,matricula,ativo'),
-      fetchAll('equipamento', 'id,codigo,nome,descricao,grupo_id,localizacao_id,fabricante,modelo,numero_serie,status,criticidade,geral'),
-      fetchAll('grupo_equipamento', 'id,nome,descricao,codigo_base,ativo'),
-      fetchAll('ordem_servico', 'id,numero,equipamento_id,plano_id,tecnico_id,tipo,status,prioridade,titulo,descricao,sla_horas,data_abertura,data_limite,data_conclusao,tempo_gasto_minutos,servico_executado,confirmada_em', 'data_abertura'),
-      fetchAll('vw_proxima_manutencao_equipamento', '*'),
-      fetchAll('registro_manutencao', 'id,equipamento_id,tecnico_id,tipo_manutencao,data_servico,hora_inicio,hora_fim'),
+      // toda leitura paginada precisa de ordem estável (senão, acima de 1000 linhas, o banco pode repetir ou pular registros)
+      fetchAll('tecnico', 'id,nome,matricula,ativo', 'id'),
+      fetchAll('equipamento', 'id,codigo,nome,descricao,grupo_id,localizacao_id,fabricante,modelo,numero_serie,status,criticidade,geral', 'id'),
+      fetchAll('grupo_equipamento', 'id,nome,descricao,codigo_base,ativo', 'id'),
+      fetchAll('ordem_servico', 'id,numero,equipamento_id,plano_id,tecnico_id,tipo,status,prioridade,titulo,descricao,sla_horas,data_abertura,data_limite,data_conclusao,tempo_gasto_minutos,servico_executado,confirmada_em', ['data_abertura', 'id']),
+      fetchAll('vw_proxima_manutencao_equipamento', '*', 'equipamento_id'),
+      fetchAll('registro_manutencao', 'id,equipamento_id,tecnico_id,ordem_servico_id,tipo_manutencao,data_servico,hora_inicio,hora_fim', 'id'),
       fetchAll('vw_registro_manutencao_detalhado', 'data,inicio,fim,tempo,tecnico,equipamento_codigo,equipamento,grupo,ordem_servico,tipo,descricao', ['data', 'inicio', 'equipamento_codigo', 'tecnico']),
-      fetchAll('plano_manutencao', 'id,codigo,nome,grupo_id,periodicidade_dias,ativo'),
+      fetchAll('plano_manutencao', 'id,codigo,nome,grupo_id,periodicidade_dias,ativo', 'id'),
       // as funções editor_* exigem perfil admin no banco; técnicos usam um modo leitura montado a partir das tabelas
       S.admin ? sb.rpc('editor_listar_grupos') : Promise.resolve({data: null, error: null})
     ]);
@@ -1081,20 +1083,26 @@ function renderProd() {
   const opened = S.os.filter(o => inRange(o.data_abertura, p.de, p.ate) && okEq(o.equipamento_id) && okTec(o.tecnico_id));
   const backlog = S.os.filter(o => o.status !== 'concluida' && okEq(o.equipamento_id) && okTec(o.tecnico_id));
   const regs = S.regs.filter(r => r.data_servico && (!p.de || r.data_servico >= p.de) && (!p.ate || r.data_servico <= p.ate) && okEq(r.equipamento_id) && okTec(r.tecnico_id));
-  const horas = regs.reduce((s, r) => s + minutesBetween(r.hora_inicio, r.hora_fim), 0) / 60;
+  const mins = r => minutesBetween(r.hora_inicio, r.hora_fim);
+  const sum = list => list.reduce((s, r) => s + mins(r), 0);
+  const prevRegs = regs.filter(r => r.tipo_manutencao === 'preventiva'), corrRegs = regs.filter(r => r.tipo_manutencao === 'corretiva');
   $('#pKpis').innerHTML = [
-    [done.length, 'OS concluídas'], [done.filter(o => o.tipo === 'preventiva').length, 'Preventivas concl.'],
-    [done.filter(o => o.tipo === 'corretiva').length, 'Corretivas concl.'], [opened.length, 'OS abertas no período'],
-    [backlog.length, 'Em aberto agora'], [nf1(horas), 'Horas registradas']
+    [done.length, 'OS concluídas'], [regs.length, 'Registros de manutenção'], [nf1(sum(regs) / 60), 'Horas registradas'],
+    [nf1(sum(prevRegs) / 60), 'Horas preventivas'], [nf1(sum(corrRegs) / 60), 'Horas corretivas'],
+    [opened.length, 'OS abertas no período'], [backlog.length, 'Em aberto agora']
   ].map(([v, t]) => `<div class="kpi"><b>${v}</b><span>${t}</span></div>`).join('');
   const by = new Map();
-  const get = id => { if (!by.has(id)) by.set(id, {n: 0, prev: 0, corr: 0, min: 0}); return by.get(id); };
-  done.forEach(o => { const r = get(o.tecnico_id); r.n++; if (o.tipo === 'preventiva') r.prev++; if (o.tipo === 'corretiva') r.corr++; });
-  regs.forEach(r => { get(r.tecnico_id).min += minutesBetween(r.hora_inicio, r.hora_fim); });
+  const get = id => { if (!by.has(id)) by.set(id, {n: 0, regs: 0, min: 0, prev: 0, corr: 0}); return by.get(id); };
+  done.forEach(o => { get(o.tecnico_id).n++; });
+  regs.forEach(r => { const g = get(r.tecnico_id), m = mins(r); g.regs++; g.min += m; if (r.tipo_manutencao === 'preventiva') g.prev += m; else if (r.tipo_manutencao === 'corretiva') g.corr += m; });
   const rows = [...by.entries()].sort((a, b) => b[1].min - a[1].min || b[1].n - a[1].n);
   const max = Math.max(1, ...rows.map(r => r[1].min));
-  $('#pBody').innerHTML = rows.map(([id, r]) => `<tr style="cursor:default"><td>${esc(S.tecById.get(id)?.nome || '—')}</td><td class="num">${r.n}</td><td class="num">${r.prev}</td><td class="num">${r.corr}</td><td class="num">${nf1(r.min / 60)}</td><td style="width:70px"><div class="bar"><i style="width:${Math.round(100 * r.min / max)}%"></i></div></td></tr>`).join('')
-    || '<tr><td colspan="6" class="empty" style="cursor:default">Sem atividade no período/filtros.</td></tr>';
+  $('#pBody').innerHTML = rows.map(([id, r]) => `<tr style="cursor:default"><td>${esc(S.tecById.get(id)?.nome || '—')}</td><td class="num">${r.n}</td><td class="num">${r.regs}</td><td class="num">${nf1(r.min / 60)}</td><td class="num">${nf1(r.prev / 60)}</td><td class="num">${nf1(r.corr / 60)}</td><td style="width:60px"><div class="bar"><i style="width:${Math.round(100 * r.min / max)}%"></i></div></td></tr>`).join('')
+    || '<tr><td colspan="7" class="empty" style="cursor:default">Sem atividade no período/filtros.</td></tr>';
+  const semOs = regs.filter(r => !r.ordem_servico_id).length;
+  $('#pNote').textContent = regs.length
+    ? `${semOs} de ${regs.length} registros (${Math.round(100 * semOs / regs.length)}%) não têm OS vinculada: contam nas horas, mas não em “OS conc.”. Por isso um técnico pode ter muitas horas e poucas OS concluídas.`
+    : '';
 }
 
 function renderMM() {
