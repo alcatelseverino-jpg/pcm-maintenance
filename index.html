@@ -347,7 +347,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
           </div>
           <div class="kpis" id="pKpis"></div>
           <table>
-            <thead><tr><th>Técnico</th><th class="num" title="OS concluídas no período (pela data de conclusão)">OS conc.</th><th class="num" title="Registros de manutenção lançados no período (com ou sem OS)">Regist.</th><th class="num">Horas</th><th class="num" title="Horas dos registros do tipo preventiva">H. prev.</th><th class="num" title="Horas dos registros do tipo corretiva">H. corr.</th><th class="num" title="CLT: dias em que a equipe CLT registrou; MEI: dias em que ele próprio registrou. 8 h seg–sex, 4 h sábado, domingo 0">H. disp.</th><th class="num" title="Horas registradas ÷ horas disponíveis">Prod. %</th><th></th></tr></thead>
+            <thead><tr><th>Técnico</th><th class="num" title="OS concluídas no período (pela data de conclusão)">OS conc.</th><th class="num" title="Registros de manutenção lançados no período (com ou sem OS)">Regist.</th><th class="num">Horas</th><th class="num" title="Horas dos registros do tipo preventiva">Horas prev.</th><th class="num" title="Horas dos registros do tipo corretiva">Horas corr.</th><th class="num" title="CLT: dias em que a equipe CLT registrou; MEI: desde o 1º registro dele no período. 8 h seg–sex, 4 h sábado, domingo 0">Horas disp.</th><th class="num" title="Horas registradas ÷ horas disponíveis">Produtividade %</th><th></th></tr></thead>
             <tbody id="pBody"></tbody>
           </table>
           <div class="note">Horas = soma de (hora fim − hora início) dos registros de manutenção no período; horas preventivas/corretivas seguem o tipo do registro. OS concluídas = pela data de conclusão. “Em aberto agora” não depende do período.</div>
@@ -1217,7 +1217,8 @@ function renderProd() {
   done.forEach(o => { get(o.tecnico_id).n++; });
   // horas disponíveis (seg–sex 8 h, sáb 4 h, domingo 0):
   //  CLT: dias em que a equipe CLT trabalhou (dia sem registro de nenhum CLT = feriado/parada); faltou → produtividade cai
-  //  MEI: só os dias em que o próprio MEI registrou (pode tirar férias/feriado sem penalização)
+  //  MEI: a partir do 1º registro dele no período até o fim do período (ou hoje); conta os dias em que a equipe CLT trabalhou
+  //       ou em que ele próprio registrou (feriado sem ninguém não conta; antes de começar a registrar também não)
   const hoje = iso(new Date());
   const isMei = id => S.tecById.get(id)?.regime === 'mei';
   const inPer = d => d && (!p.de || d >= p.de) && (!p.ate || d <= p.ate) && d <= hoje;
@@ -1229,10 +1230,17 @@ function renderProd() {
     else { if (!diasMei.has(r.tecnico_id)) diasMei.set(r.tecnico_id, new Set()); diasMei.get(r.tecnico_id).add(r.data_servico); }
   });
   let dispClt = 0; diasClt.forEach(d => { dispClt += minDia(d); });
-  const dispMin = id => { if (!isMei(id)) return dispClt; let m = 0; (diasMei.get(id) || []).forEach(d => { m += minDia(d); }); return m; };
+  const dispMin = id => {
+    if (!isMei(id)) return dispClt;
+    const meus = diasMei.get(id); if (!meus || !meus.size) return 0;
+    const ini = [...meus].sort()[0], fim = p.ate && p.ate < hoje ? p.ate : hoje;
+    let m = 0; const dias = new Set([...diasClt, ...meus]);
+    dias.forEach(d => { if (d >= ini && d <= fim) m += minDia(d); });
+    return m;
+  };
   regs.forEach(r => { const g = get(r.tecnico_id), m = mins(r); g.regs++; g.min += m; if (r.tipo_manutencao === 'preventiva') g.prev += m; else if (r.tipo_manutencao === 'corretiva') g.corr += m; });
   const rows = [...by.entries()].sort((a, b) => b[1].min - a[1].min || b[1].n - a[1].n);
-  $('#pBody').innerHTML = rows.map(([id, r]) => `<tr style="cursor:default"><td>${esc(S.tecById.get(id)?.nome || '—')} <span class="muted">${S.tecById.get(id)?.regime === 'mei' ? 'MEI' : 'CLT'}</span></td><td class="num">${r.n}</td><td class="num">${r.regs}</td><td class="num">${nf1(r.min / 60)}</td><td class="num">${nf1(r.prev / 60)}</td><td class="num">${nf1(r.corr / 60)}</td>${(() => { const d = dispMin(id), pc = d ? Math.round(100 * r.min / d) : null; return `<td class="num">${nf1(d / 60)}</td><td class="num"><b>${pc == null ? '—' : pc + '%'}</b></td><td style="width:60px"><div class="bar"><i style="width:${Math.min(100, pc || 0)}%"></i></div></td>`; })()}</tr>`).join('')
+  $('#pBody').innerHTML = rows.map(([id, r]) => `<tr style="cursor:default"><td>${esc(S.tecById.get(id)?.nome || '—')}</td><td class="num">${r.n}</td><td class="num">${r.regs}</td><td class="num">${nf1(r.min / 60)}</td><td class="num">${nf1(r.prev / 60)}</td><td class="num">${nf1(r.corr / 60)}</td>${(() => { const d = dispMin(id), pc = d ? Math.round(100 * r.min / d) : null; return `<td class="num">${nf1(d / 60)}</td><td class="num"><b>${pc == null ? '—' : pc + '%'}</b></td><td style="width:60px"><div class="bar"><i style="width:${Math.min(100, pc || 0)}%"></i></div></td>`; })()}</tr>`).join('')
     || '<tr><td colspan="9" class="empty" style="cursor:default">Sem atividade no período/filtros.</td></tr>';
   if (rows.length) {   // linha final: total geral (todos os técnicos listados)
     const T = rows.reduce((t, [id, r]) => ({n: t.n + r.n, regs: t.regs + r.regs, min: t.min + r.min, prev: t.prev + r.prev, corr: t.corr + r.corr, disp: t.disp + dispMin(id)}), {n: 0, regs: 0, min: 0, prev: 0, corr: 0, disp: 0});
@@ -1241,7 +1249,7 @@ function renderProd() {
   }
   const semOs = regs.filter(r => !r.ordem_servico_id).length;
   $('#pNote').textContent = regs.length
-    ? `Produtividade = horas registradas ÷ horas disponíveis (seg–sex 8 h, sábado 4 h, domingo 0). CLT: contam os dias em que a equipe CLT registrou (dia sem registro = feriado); se faltou, a produtividade cai. MEI: contam só os dias em que ele próprio registrou. Pode passar de 100%. ${semOs} de ${regs.length} registros (${Math.round(100 * semOs / regs.length)}%) não têm OS vinculada: contam nas horas, mas não em “OS conc.”. Por isso um técnico pode ter muitas horas e poucas OS concluídas.`
+    ? `Produtividade = horas registradas ÷ horas disponíveis (seg–sex 8 h, sábado 4 h, domingo 0). Dias de trabalho = dias em que a equipe registrou (dia sem registro de ninguém = feriado). CLT: todos esses dias; se faltou, a produtividade cai. MEI: a partir do 1º registro dele no período. Pode passar de 100%. ${semOs} de ${regs.length} registros (${Math.round(100 * semOs / regs.length)}%) não têm OS vinculada: contam nas horas, mas não em “OS conc.”. Por isso um técnico pode ter muitas horas e poucas OS concluídas.`
     : '';
 }
 
