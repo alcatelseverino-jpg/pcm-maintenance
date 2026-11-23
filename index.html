@@ -188,6 +188,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
 .ask{margin-top:10px;padding:9px 12px;border-radius:8px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:13px}
 .tot td{border-top:2px solid var(--ink);background:var(--soft)}
 .gt{flex-wrap:wrap;margin-bottom:8px}
+.cki{display:flex;gap:6px;align-items:center;margin-bottom:6px}.cki input{flex:1}.cki .ib:disabled{opacity:.35;cursor:not-allowed}
 .dayacts{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px}
 .dia-it{display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px;cursor:pointer}
 .gcont .sub{margin:0 -4px}
@@ -487,8 +488,10 @@ function openModal({title, body, actions = [], wide = false, closeLabel = 'Cance
       if (a.confirm) {   // confirmação em 2 passos, sem janela do navegador: 1º clique pede, 2º clique executa
         const ask = $('#dlgAsk');
         if (!armed) {
+          let msg = a.confirm;
+          if (typeof msg === 'function') { b.disabled = true; try { msg = await msg(); } catch (e) { showErr(e); return; } finally { b.disabled = false; } }
           armed = true; b.textContent = a.confirmLabel || 'Confirmar';
-          if (ask) { ask.textContent = a.confirm; ask.hidden = false; }
+          if (ask) { ask.textContent = msg; ask.hidden = false; }
           setTimeout(() => { if (armed && b.isConnected) { armed = false; b.textContent = a.label; if (ask) ask.hidden = true; } }, 8000);
           return;
         }
@@ -1166,7 +1169,13 @@ async function openOS(id) {
 
   const actions = [];
   if (!locked) actions.push({label: 'Salvar', cls: 'pri', run: async () => { await save(); closeModal(); toast('OS salva.', 'good'); await loadAll(); }});
-  if (!locked && !done) actions.push({label: 'Salvar e fechar OS', cls: 'pri', confirm: `Fechar a OS ${o.numero}? Depois de confirmada, só o administrador pode reabrir.`, confirmLabel: 'Confirmar fechamento', run: async () => {
+  if (!locked && !done) actions.push({label: 'Salvar e fechar OS', cls: 'pri', confirm: () => {
+    const marca = (el, msg) => { el.style.borderColor = 'var(--red)'; el.scrollIntoView({block: 'center'}); el.focus(); throw new Error(msg); };
+    if (!$('#o_tec').value) marca($('#o_tec'), 'Escolha o técnico que executou a OS (campo “Técnico”, no topo) antes de fechar. Todo fechamento precisa de técnico.');
+    const faltam = ck.filter(c => !$(`[data-ck="${c.id}"]`)?.value);
+    if (faltam.length) marca($(`[data-ck="${faltam[0].id}"]`), `Faltam ${faltam.length} item(ns) do checklist para responder (o primeiro está destacado).`);
+    return `Fechar a OS ${o.numero}? Depois de confirmada, só o administrador pode reabrir.`;
+  }, confirmLabel: 'Confirmar fechamento', run: async () => {
     await save();
     const {data, error} = await sb.rpc('confirmar_os', {p_os_id: o.id, p_pin: S.admin ? null : (nz($('#o_pin')?.value)), p_servico_executado: nz($('#o_svc').value)});
     if (error) throw error;
@@ -1421,7 +1430,7 @@ function renderGroups() {
   $('#grpBody').innerHTML = rows.map(g => `<tr data-g="${g.grupo_id}" class="${S.selGrupo === g.grupo_id ? 'sel' : ''}">
     <td>${esc(g.grupo_nome)}</td><td class="mono">${esc(g.codigo_base || '')}</td>
     <td class="num">${g.qtd_equipamentos ?? 0}</td><td class="num">${g.periodicidade_dias ?? '—'}</td><td class="num">${g.qtd_itens_checklist ?? '—'}</td>
-    <td class="act">${S.admin ? `<button class="ib" data-editg="${g.grupo_id}" title="Editar grupo" type="button">✎</button>` : ''}</td></tr>`).join('')
+    <td class="act">${S.admin ? `<button class="ib" data-ckg="${g.grupo_id}" title="Editar checklist do grupo" type="button">☑</button><button class="ib" data-editg="${g.grupo_id}" title="Editar grupo" type="button">✎</button>` : ''}</td></tr>`).join('')
     || '<tr><td colspan="6" class="empty">Nenhum grupo.</td></tr>';
 }
 function renderEquips() {
@@ -1431,7 +1440,7 @@ function renderEquips() {
     <td class="mono">${esc(e.codigo || '')}</td><td class="ell" style="max-width:170px" title="${esc(e.nome)}">${esc(e.nome)}</td>
     <td><span class="badge b-${e.status}">${esc(L.eq[e.status] || e.status)}</span></td>
     <td class="num" title="${e.periodicidade_propria_dias ? 'periodicidade própria' : 'periodicidade do grupo'}">${e.periodicidade_propria_dias ? e.periodicidade_propria_dias + '*' : (e.periodicidade_grupo_dias ?? '—')}</td>
-    <td class="act">${S.admin ? `<button class="ib" data-edite="${e.equipamento_id}" title="Editar equipamento" type="button">✎</button>` : ''}</td></tr>`).join('')
+    <td class="act">${S.admin ? `<button class="ib" data-cke="${e.equipamento_id}" title="Editar checklist do equipamento" type="button">☑</button><button class="ib" data-edite="${e.equipamento_id}" title="Editar equipamento" type="button">✎</button>` : ''}</td></tr>`).join('')
     || '<tr><td colspan="5" class="empty">Grupo sem equipamentos.</td></tr>')
     : '<tr><td colspan="5" class="empty">Clique em um grupo acima.</td></tr>';
 }
@@ -1448,12 +1457,16 @@ async function loadEquips(gid) {
 }
 $('#grpQ').addEventListener('input', renderGroups);
 $('#grpBody').addEventListener('click', async e => {
+  const ck = e.target.closest('[data-ckg]');
+  if (ck) { e.stopPropagation(); openChecklist(ck.dataset.ckg, null); return; }
   const ed = e.target.closest('[data-editg]');
   if (ed) { e.stopPropagation(); openGrupo(ed.dataset.editg); return; }
   const tr = e.target.closest('tr[data-g]'); if (!tr) return;
   S.selGrupo = tr.dataset.g; renderGroups(); await loadEquips(S.selGrupo);
 });
 $('#eqBody').addEventListener('click', e => {
+  const ck = e.target.closest('[data-cke]');
+  if (ck) { openChecklist(S.selGrupo, ck.dataset.cke); return; }
   const b = e.target.closest('[data-edite]');
   if (b) { openEquip(b.dataset.edite); return; }
   const tr = e.target.closest('tr[data-e]'); if (tr && S.admin) openEquip(tr.dataset.e);
@@ -1467,6 +1480,67 @@ const simText = r => {
   if ('equipamentos_afetados' in r) return `Equipamentos afetados: ${r.equipamentos_afetados} · atrasados antes → depois: ${r.atrasados_antes} → ${r.atrasados_depois} · próxima manutenção mais cedo: ${fmtDate(r.proxima_mais_cedo)}`;
   return `Próxima manutenção: ${fmtDate(r.proxima_manutencao)} · status ${L.cal[r.status_antes] || r.status_antes} → ${L.cal[r.status_depois] || r.status_depois}`;
 };
+
+/* ---- checklist (do grupo ou do equipamento) ---- */
+const ACAO_L = {inserir: 'novo', atualizar: 'alterado', remover: 'removido', manter: 'igual', bloqueado: 'bloqueado'};
+async function openChecklist(gid, eid) {
+  if (!S.admin) { toast('Somente o administrador edita checklists.', 'bad'); return; }
+  const g = S.grpById.get(gid), eq = eid ? S.eqById.get(eid) : null;
+  const {data, error} = await sb.rpc('editor_obter_checklist', {p_grupo_id: gid, p_equipamento_id: eid});
+  if (error) { toast(errMsg(error), 'bad'); return; }
+  // se o equipamento ainda usa a lista do grupo, os itens viram uma lista própria nova (sem id)
+  const propria = eid && data.origem === 'equipamento';
+  const st = {itens: (data.itens || []).map(i => ({id: (eid && !propria) ? null : i.id, descricao: i.descricao, usado: (eid && !propria) ? 0 : (i.usado_em_os || 0)}))};
+  const grab = () => $$('#dlgBody [data-ckitem]').forEach((inp, i) => { if (st.itens[i]) st.itens[i].descricao = inp.value; });
+  const draw = () => {
+    $('#ckList').innerHTML = st.itens.map((it, i) => `<div class="cki"><span class="muted">${i + 1}</span>
+      <input type="text" data-ckitem maxlength="120" value="${esc(it.descricao)}" placeholder="Descrição do item (3 a 120 caracteres)">
+      <button type="button" class="ib" data-ckmv="${i}:-1" title="Subir"${i === 0 ? ' disabled' : ''}>↑</button>
+      <button type="button" class="ib" data-ckmv="${i}:1" title="Descer"${i === st.itens.length - 1 ? ' disabled' : ''}>↓</button>
+      <button type="button" class="ib" data-ckrm="${i}" title="${it.usado ? 'Item já usado em ' + it.usado + ' OS: não pode ser excluído' : 'Remover'}"${it.usado ? ' disabled' : ''}>✕</button>
+      ${it.usado ? `<span class="muted" title="Alterar o texto muda também essas OS">usado em ${it.usado} OS</span>` : ''}</div>`).join('') || '<div class="empty">Lista vazia: adicione itens.</div>';
+    $('#ckAdd').disabled = st.itens.length >= 15;
+  };
+  const origem = !eid ? `Checklist do grupo <b>${esc(g?.nome || '')}</b>. Vale para todos os equipamentos do grupo que não têm lista própria.`
+    : propria ? `Lista <b>própria</b> do equipamento <b>${esc(eq?.codigo || '')}</b> (substitui a do grupo).`
+    : `O equipamento <b>${esc(eq?.codigo || '')}</b> usa hoje a lista do grupo. Se você salvar, ele passa a ter uma <b>lista própria</b> (a do grupo não muda).`;
+  const body = `<div class="full hint">${origem}</div><div class="full"><div id="ckList"></div><button type="button" class="btn" id="ckAdd">＋ Item</button>` +
+    (propria ? ' <button type="button" class="btn dan" id="ckReset">Voltar a usar o checklist do grupo</button>' : '') +
+    '</div><div class="full hint muted">Até 15 itens, 3 a 120 caracteres, sem repetição. Itens já usados em OS não podem ser excluídos; alterar o texto de um item usado muda também essas OS. Só vale para OS abertas depois: as OS já abertas mantêm os itens que receberam.</div>';
+  openModal({title: eid ? `Checklist — ${eq?.codigo || eq?.nome}` : `Checklist — ${g?.nome || ''}`, body, wide: true, actions: [{label: 'Salvar checklist', cls: 'pri',
+    confirm: async () => {
+      grab();
+      const {data: plano, error: e1} = await sb.rpc('editor_salvar_checklist', {p_grupo_id: gid, p_equipamento_id: eid, p_itens: st.itens.map(i => ({id: i.id, descricao: i.descricao})), p_aplicar: false});
+      if (e1) throw e1;
+      const ruim = (plano || []).filter(p => p.acao === 'bloqueado');
+      if (ruim.length) throw new Error(ruim.map(p => `“${p.descricao}”: ${p.motivo}`).join(' · '));
+      const c = a => (plano || []).filter(p => p.acao === a).length;
+      const avisos = (plano || []).filter(p => p.motivo).map(p => p.motivo);
+      return `Salvar: ${c('inserir')} novo(s), ${c('atualizar')} alterado(s), ${c('remover')} removido(s), ${c('manter')} igual(is).` + (avisos.length ? ' Atenção: ' + [...new Set(avisos)].join(' ') : '');
+    },
+    confirmLabel: 'Confirmar e salvar', run: async () => {
+      grab();
+      const {error: e2} = await sb.rpc('editor_salvar_checklist', {p_grupo_id: gid, p_equipamento_id: eid, p_itens: st.itens.map(i => ({id: i.id, descricao: i.descricao})), p_aplicar: true});
+      if (e2) throw e2;
+      closeModal(); toast('Checklist salvo.', 'good'); await loadAll();
+    }}]});
+  draw();
+  $('#ckAdd').addEventListener('click', () => { grab(); st.itens.push({id: null, descricao: '', usado: 0}); draw(); const l = $$('#dlgBody [data-ckitem]'); l[l.length - 1]?.focus(); });
+  $('#ckList').addEventListener('click', e => {
+    const mv = e.target.closest('[data-ckmv]'), rm = e.target.closest('[data-ckrm]');
+    if (mv) { grab(); const [i, d] = mv.dataset.ckmv.split(':').map(Number); const j = i + d; if (st.itens[j]) { [st.itens[i], st.itens[j]] = [st.itens[j], st.itens[i]]; draw(); } }
+    if (rm) { grab(); st.itens.splice(Number(rm.dataset.ckrm), 1); draw(); }
+  });
+  const rs = $('#ckReset');
+  if (rs) rs.addEventListener('click', async () => {
+    if (!twoStep(rs, 'Clique de novo: usar o do grupo')) return;
+    try {
+      const {data: r1, error: e3} = await sb.rpc('editor_remover_checklist_equipamento', {p_equipamento_id: eid, p_aplicar: true});
+      if (e3) throw e3; if (!r1?.ok) throw new Error(r1?.motivo || 'Não foi possível remover a lista própria.');
+      closeModal(); toast('O equipamento voltou a usar o checklist do grupo.', 'good'); await loadAll();
+    } catch (err) { showErr(err); }
+  });
+}
 
 /* ---- grupo ---- */
 function openGrupo(id) {
