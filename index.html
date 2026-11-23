@@ -350,6 +350,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
             <label>Até <input type="date" id="pAte"></label>
             <label>Técnico <select id="pTec"></select></label>
             <label>Grupo <select id="pGrp"></select></label>
+            <button class="btn" id="btnPRel" type="button" title="Abre um relatório de produtividade pronto para imprimir ou salvar em PDF">🖨 Relatório</button>
             <button class="btn" id="btnPExp" type="button" title="Exporta a tabela para Excel (CSV)">⬇ Excel</button>
           </div>
           <div class="kpis" id="pKpis"></div>
@@ -850,6 +851,37 @@ function refreshDialogs() {
   if (t === 'Equipe e calendário') openEquipe();
   else if (t === 'Gestão da manutenção') renderGestao();
 }
+
+/* ---------- relatório de produtividade para imprimir ---------- */
+$('#btnPRel').addEventListener('click', () => {
+  const w = window.open('', '_blank');
+  if (!w) { toast('O navegador bloqueou a nova aba. Permita pop-ups para este site e tente de novo.', 'bad'); return; }
+  const p = S.f.prod, de = p.de || '', ate = p.ate || '';
+  const tbl = $('#tabProd table').cloneNode(true);
+  tbl.querySelectorAll('tr').forEach(tr => tr.lastElementChild && tr.lastElementChild.remove());   // sem a coluna da barrinha
+  tbl.querySelectorAll('[style],[title]').forEach(el => { el.removeAttribute('style'); el.removeAttribute('title'); });
+  const kp = $$('#pKpis .kpi').map(k => `<div class="k"><b>${esc(k.querySelector('b').textContent)}</b><span>${esc(k.innerText.replace(k.querySelector('b').textContent, '').trim())}</span></div>`).join('');
+  const fer = (S.feriados || []).filter(f => (!de || f.data >= de) && (!ate || f.data <= ate)).map(f => `${fmtDia(f.data)} (${esc(f.descricao)})`);
+  const aus = (S.ausencias || []).filter(a => (!ate || a.data_inicio <= ate) && (!de || a.data_fim >= de)).map(a => `${esc(S.tecById.get(a.tecnico_id)?.nome || '—')}: ${fmtDia(a.data_inicio)} a ${fmtDia(a.data_fim)} (${esc(AUS_L[a.tipo] || a.tipo)})`);
+  const nome = `Produtividade_${de || 'inicio'}_a_${ate || 'hoje'}`;
+  const filtros = [`Período: <b>${de ? fmtDia(de) : 'início'} a ${ate ? fmtDia(ate) : 'hoje'}</b>`, `Técnico: <b>${esc(S.tecById.get(p.tec)?.nome || 'Todos')}</b>`, `Grupo: <b>${esc(S.grpById.get(p.grupo)?.nome || 'Todos')}</b>`].join(' &nbsp;·&nbsp; ');
+  const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(nome)}</title>
+<style>@page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{font:12px Arial,sans-serif;color:#111;margin:0}
+.bar{display:flex;justify-content:flex-end;gap:8px;padding:8px 12px;background:#0f766e}.bar button{border:0;border-radius:6px;padding:7px 14px;font-weight:700;cursor:pointer}
+.pg{padding:14px 16px}h1{font-size:18px;margin:0 0 2px}.sub{color:#444;margin:0 0 10px}.fl{margin:8px 0 10px;padding:6px 8px;background:#f1f5f9;border-radius:4px}
+.ks{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px}.k{border:1px solid #bbb;border-radius:6px;padding:6px 10px;min-width:92px}.k b{display:block;font-size:17px}.k span{font-size:10px;color:#555}
+table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border:1px solid #999;padding:4px 6px;text-align:left}th{background:#e5e7eb;font-size:11px}
+.num{text-align:right}.tot td{font-weight:700;background:#f1f5f9;border-top:2px solid #111}
+.n{font-size:10.5px;color:#333;margin-top:10px;line-height:1.45}.n b{color:#000}
+@media print{.bar{display:none}.pg{padding:0}}</style></head><body>
+<div class="bar"><button onclick="window.print()">Imprimir / Salvar em PDF</button></div>
+<div class="pg"><h1>Relatório de produtividade</h1><p class="sub">GestorPCM · TECJATO · gerado em ${new Date().toLocaleString('pt-BR', {timeZone: TZ})}</p>
+<div class="fl">${filtros}</div><div class="ks">${kp}</div>${tbl.outerHTML}
+<div class="n"><b>Como é calculado.</b> Produtividade = horas registradas ÷ horas disponíveis. Horas disponíveis: segunda a sexta 8 h e sábado 4 h (44 h semanais), só em dias de trabalho da equipe (dia sem registro de ninguém é tratado como feriado), descontando feriados e ausências cadastrados. MEI conta a partir do 1º registro dele no período. Pode passar de 100%. “OS conc.” = OS concluídas no período; “Regist.” = registros de manutenção (com ou sem OS).</div>
+${fer.length ? `<div class="n"><b>Feriados no período:</b> ${fer.join('; ')}</div>` : ''}${aus.length ? `<div class="n"><b>Ausências no período:</b> ${aus.join('; ')}</div>` : ''}
+<div class="n">${esc($('#pNote').textContent.replace(/^.*?Pode passar de 100%\.\s*/, ''))}</div></div></body></html>`;
+  w.document.open(); w.document.write(html); w.document.close();
+});
 
 /* ---------- exportar tabelas ---------- */
 $('#btnPExp').addEventListener('click', () => tableCsv($('#tabProd table'), `produtividade_${todayIso()}.csv`));
