@@ -187,6 +187,8 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
 }
 .ask{margin-top:10px;padding:9px 12px;border-radius:8px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:13px}
 .tot td{border-top:2px solid var(--ink);background:var(--soft)}
+.gt{flex-wrap:wrap;margin-bottom:8px}
+.gcont .sub{margin:0 -4px}
 .pcell{width:34px;text-align:center;padding:0 4px}
 .pbtn{border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer;font-size:13px;line-height:1;padding:3px 6px}
 .pbtn:hover{background:#f1f5f9}
@@ -220,6 +222,8 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
     <span class="sp"></span>
     <span id="busy" hidden>Carregando…</span>
     <span class="chip" id="userChip"></span>
+    <button class="btn" id="btnGestao" type="button" title="OS fora do prazo, aderência preventiva, maiores paradas e qualidade dos registros">📋 Gestão</button>
+    <button class="btn" id="btnEquipe" type="button" title="Regime dos técnicos, feriados e ausências">👥 Equipe e calendário</button>
     <button class="btn" id="btnNC" type="button" title="Itens do checklist marcados como Não OK">⚠ Não conformidades<span class="ncn" id="ncN" hidden></span></button>
     <button class="btn" id="btnReload" type="button">↻ Atualizar</button>
     <button class="btn" id="btnOut" type="button">Sair</button>
@@ -228,7 +232,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
   <main class="grid">
     <!-- ESQUERDA: ORDENS DE SERVIÇO -->
     <section class="panel" id="p-os">
-      <div class="ph"><h2>Ordens de serviço</h2><span class="muted" id="osCount"></span></div>
+      <div class="ph"><h2>Ordens de serviço</h2><span class="sp"></span><button class="btn" id="btnPrintSel" type="button" hidden>🖨 Imprimir</button><button class="btn" id="btnOSExp" type="button" title="Exporta a lista atual para Excel (CSV)">⬇ Excel</button><span class="muted" id="osCount"></span></div>
       <div class="sub">
         <input type="search" id="osQ" placeholder="Buscar nº, equipamento, técnico…">
         <select id="osSt">
@@ -259,7 +263,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
           <div class="halfh">Ordens de serviço <span class="muted" style="font-weight:400">· passe o cursor sobre uma OS</span></div>
           <div class="pb">
             <table>
-              <thead><tr><th>Nº</th><th>Equip.</th><th>Técnico</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th class="nox pcell"><input type="checkbox" id="osAll" title="Marcar todas as OS da lista"></th><th>Nº</th><th>Equip.</th><th>Técnico</th><th>Status</th><th class="nox"></th></tr></thead>
               <tbody id="osBody"></tbody>
             </table>
           </div>
@@ -344,6 +348,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
             <label>Até <input type="date" id="pAte"></label>
             <label>Técnico <select id="pTec"></select></label>
             <label>Grupo <select id="pGrp"></select></label>
+            <button class="btn" id="btnPExp" type="button" title="Exporta a tabela para Excel (CSV)">⬇ Excel</button>
           </div>
           <div class="kpis" id="pKpis"></div>
           <table>
@@ -381,6 +386,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
 <div id="toasts"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script>
 'use strict';
 /* ====================================================================
@@ -460,14 +466,14 @@ function showErr(e) {
 function setBusy(b) { $('#busy').hidden = !b; }
 
 /* ---------- modal ---------- */
-function openModal({title, body, actions = [], wide = false}) {
+function openModal({title, body, actions = [], wide = false, closeLabel = 'Cancelar'}) {
   const dlg = $('#dlg');
   $('#dlgTitle').textContent = title;
   $('#dlgBody').innerHTML = body + '<div class="ask" id="dlgAsk" hidden></div><div class="err" id="dlgErr" hidden></div>';
   dlg.classList.toggle('wide', wide);
   const foot = $('#dlgFoot'); foot.innerHTML = '';
   const cancel = document.createElement('button');
-  cancel.type = 'button'; cancel.className = 'btn'; cancel.textContent = 'Cancelar';
+  cancel.type = 'button'; cancel.className = 'btn'; cancel.textContent = closeLabel;
   cancel.addEventListener('click', closeModal); foot.appendChild(cancel);
   actions.forEach(a => {
     const b = document.createElement('button');
@@ -564,19 +570,21 @@ async function fetchAll(table, select, orderCol) {
 async function loadAll() {
   setBusy(true);
   try {
-    const [tec, eq, gr, os, cal, regs, regd, planos, edg, ncs] = await Promise.all([
+    const [tec, eq, gr, os, cal, regs, regd, planos, edg, ncs, fers, auss] = await Promise.all([
       // toda leitura paginada precisa de ordem estável (senão, acima de 1000 linhas, o banco pode repetir ou pular registros)
       fetchAll('tecnico', 'id,nome,matricula,ativo,regime', 'id'),
       fetchAll('equipamento', 'id,codigo,nome,descricao,grupo_id,localizacao_id,fabricante,modelo,numero_serie,status,criticidade,geral', 'id'),
       fetchAll('grupo_equipamento', 'id,nome,descricao,codigo_base,ativo', 'id'),
       fetchAll('ordem_servico', 'id,numero,equipamento_id,plano_id,tecnico_id,tipo,status,prioridade,titulo,descricao,sla_horas,data_abertura,data_limite,data_conclusao,tempo_gasto_minutos,servico_executado,confirmada_em', ['data_abertura', 'id']),
       fetchAll('vw_proxima_manutencao_equipamento', '*', 'equipamento_id'),
-      fetchAll('registro_manutencao', 'id,equipamento_id,tecnico_id,ordem_servico_id,tipo_manutencao,data_servico,hora_inicio,hora_fim', 'id'),
+      fetchAll('registro_manutencao', 'id,equipamento_id,tecnico_id,ordem_servico_id,tipo_manutencao,data_servico,hora_inicio,hora_fim,descricao', 'id'),
       fetchAll('vw_registro_manutencao_detalhado', 'data,inicio,fim,tempo,tecnico,equipamento_codigo,equipamento,grupo,ordem_servico,tipo,descricao', ['data', 'inicio', 'equipamento_codigo', 'tecnico']),
       fetchAll('plano_manutencao', 'id,codigo,nome,grupo_id,periodicidade_dias,ativo', 'id'),
       // as funções editor_* exigem perfil admin no banco; técnicos usam um modo leitura montado a partir das tabelas
       S.admin ? sb.rpc('editor_listar_grupos') : Promise.resolve({data: null, error: null}),
-      fetchAll('nao_conformidade', 'id,ordem_servico_id,equipamento_id,descricao,status,os_corretiva_id,criado_em,decidido_em', 'id').catch(() => [])
+      fetchAll('nao_conformidade', 'id,ordem_servico_id,equipamento_id,descricao,status,os_corretiva_id,criado_em,decidido_em', 'id').catch(() => []),
+      fetchAll('feriado', 'id,data,descricao', 'data').catch(() => []),
+      fetchAll('ausencia', 'id,tecnico_id,data_inicio,data_fim,tipo,observacao', 'id').catch(() => [])
     ]);
     if (edg.error) throw edg.error;
     S.tecnicos = tec.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
@@ -592,6 +600,7 @@ async function loadAll() {
     S.regs = regs;
     S.regd = regd;
     S.ncs = ncs;
+    S.feriados = fers; S.ausencias = auss;
     S.planoById = new Map(planos.map(p => [p.id, p]));
     S.edGrupos = S.admin
       ? (edg.data || [])
@@ -603,6 +612,7 @@ async function loadAll() {
     fillSelects();
     renderAll();
     renderNC();
+    refreshDialogs();
     if (S.selGrupo) await loadEquips(S.selGrupo, false);
   } finally { setBusy(false); }
 }
@@ -613,6 +623,273 @@ function fillSelects() {
   const el = $('#pTec'), v = el.value;
   el.innerHTML = optList(S.tecnicos.map(t => [t.id, t.nome]), '', 'Todos os técnicos'); el.value = v;
 }
+
+/* ================= extras: equipe/calendário, gestão, exportação, impressão em lote ================= */
+const DOWN = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+const fmtDia = d => { if (!d) return '—'; const [y, m, dd] = String(d).split('-'); return `${dd}/${m}/${y}`; };
+const dowOf = d => DOWN[new Date(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)).getDay()];
+const todayIso = () => iso(new Date());
+const addDays = (d, n) => { const x = new Date(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10) + n); return iso(x); };
+
+// confirmação em 2 passos num botão (1º clique arma, 2º executa) — sem janela do navegador
+function twoStep(btn, label) {
+  if (btn.dataset.armed) { delete btn.dataset.armed; return true; }
+  btn.dataset.armed = '1'; btn.dataset.lbl = btn.textContent; btn.textContent = label;
+  setTimeout(() => { if (btn.isConnected && btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = btn.dataset.lbl; } }, 6000);
+  return false;
+}
+
+// exporta uma tabela da tela para CSV (abre no Excel; separador ; e acentos preservados)
+function tableCsv(tbl, nome) {
+  const q = t => '"' + t.replace(/\s+/g, ' ').trim().replace(/"/g, '""') + '"';
+  const rows = [...tbl.querySelectorAll('tr')].map(tr => [...tr.children].filter(c => !c.classList.contains('nox')).map(c => q(c.innerText)).join(';'));
+  const blob = new Blob(['﻿' + rows.join('\r\n')], {type: 'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/* ---------- Equipe e calendário: regime, feriados, ausências ---------- */
+const AUS_L = {ferias: 'Férias', folga: 'Folga', ausencia: 'Ausência justificada'};
+function openEquipe() {
+  const st = $('#dlgBody').scrollTop, ed = S.admin, dis = ed ? '' : ' disabled';
+  const fer = (S.feriados || []).slice().sort((a, b) => b.data.localeCompare(a.data));
+  const aus = (S.ausencias || []).slice().sort((a, b) => b.data_inicio.localeCompare(a.data_inicio));
+  const tecs = S.tecnicos.filter(t => t.ativo);
+  const body =
+    '<div class="full"><h4 style="margin:0 0 6px">Técnicos: regime</h4>' +
+    '<table><thead><tr><th>Técnico</th><th>Regime</th></tr></thead><tbody>' +
+    tecs.map(t => `<tr style="cursor:default"><td>${esc(t.nome)}</td><td><select data-reg="${t.id}"${dis}><option value="clt"${t.regime === 'mei' ? '' : ' selected'}>CLT</option><option value="mei"${t.regime === 'mei' ? ' selected' : ''}>MEI</option></select></td></tr>`).join('') +
+    '</tbody></table><div class="hint muted">CLT: a base de horas é a dos dias em que a equipe trabalhou. MEI: a partir do 1º registro dele no período.</div></div>' +
+    '<div class="full"><h4 style="margin:14px 0 6px">Feriados</h4>' +
+    (ed ? `<div class="sub" style="border:0;padding:4px 0;background:transparent"><input type="date" id="f_data"><input type="text" id="f_desc" placeholder="Descrição (ex.: Consciência Negra)" style="flex:1;min-width:160px"><button type="button" class="btn pri" data-fadd>Adicionar</button></div>` : '') +
+    '<table><thead><tr><th>Data</th><th>Descrição</th><th></th></tr></thead><tbody>' +
+    (fer.map(f => `<tr style="cursor:default"><td class="mono">${fmtDia(f.data)} <span class="muted">${dowOf(f.data)}</span></td><td>${esc(f.descricao)}</td><td>${ed ? `<button type="button" class="btn dan" data-fdel="${f.id}">Excluir</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="3" class="empty" style="cursor:default">Nenhum feriado cadastrado.</td></tr>') +
+    '</tbody></table><div class="hint muted">Feriados cadastrados não entram nas horas disponíveis. Dias sem registro de ninguém continuam sendo tratados como feriado.</div></div>' +
+    '<div class="full"><h4 style="margin:14px 0 6px">Ausências (férias, folgas)</h4>' +
+    (ed ? `<div class="sub" style="border:0;padding:4px 0;background:transparent"><select id="a_tec">${optList(tecs.map(t => [t.id, t.nome]), '', 'Técnico…')}</select><label>De <input type="date" id="a_de"></label><label>Até <input type="date" id="a_ate"></label><select id="a_tipo">${optList(Object.entries(AUS_L), 'ferias')}</select><input type="text" id="a_obs" placeholder="Observação (sem detalhes de saúde)" style="flex:1;min-width:140px"><button type="button" class="btn pri" data-aadd>Adicionar</button></div>` : '') +
+    '<table><thead><tr><th>Técnico</th><th>Período</th><th>Tipo</th><th>Obs.</th><th></th></tr></thead><tbody>' +
+    (aus.map(a => `<tr style="cursor:default"><td>${esc(S.tecById.get(a.tecnico_id)?.nome || '—')}</td><td class="mono">${fmtDia(a.data_inicio)} → ${fmtDia(a.data_fim)}</td><td>${esc(AUS_L[a.tipo] || a.tipo)}</td><td>${esc(a.observacao || '')}</td><td>${ed ? `<button type="button" class="btn dan" data-adel="${a.id}">Excluir</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty" style="cursor:default">Nenhuma ausência cadastrada.</td></tr>') +
+    '</tbody></table><div class="hint muted">Os dias de ausência saem das horas disponíveis do técnico, então a produtividade não cai por férias ou folga.</div></div>' +
+    (ed ? '' : '<div class="hint muted full">Somente o administrador edita.</div>');
+  openModal({title: 'Equipe e calendário', body, actions: [], wide: true, closeLabel: 'Fechar'});
+  $('#dlgBody').scrollTop = st;
+}
+$('#btnEquipe').addEventListener('click', openEquipe);
+$('#dlgBody').addEventListener('change', async e => {
+  const r = e.target.closest('[data-reg]'); if (!r) return;
+  try {
+    const {data, error} = await sb.from('tecnico').update({regime: r.value}).eq('id', r.dataset.reg).select('id');
+    if (error) throw error;
+    if (!data?.length) throw new Error('Sem permissão para alterar o regime.');
+    toast('Regime atualizado.', 'good');
+  } catch (err) { showErr(err); }
+  await loadAll();
+});
+$('#dlgBody').addEventListener('click', async e => {
+  const b = e.target.closest('[data-fadd],[data-fdel],[data-aadd],[data-adel]'); if (!b) return;
+  try {
+    if (b.dataset.fadd !== undefined) {
+      const d = $('#f_data').value, t = nz($('#f_desc').value);
+      if (!d || !t) throw new Error('Informe a data e a descrição do feriado.');
+      const {error} = await sb.from('feriado').insert({data: d, descricao: t}); if (error) throw error;
+      toast('Feriado cadastrado.', 'good');
+    } else if (b.dataset.aadd !== undefined) {
+      const t = $('#a_tec').value, de = $('#a_de').value, ate = $('#a_ate').value;
+      if (!t || !de || !ate) throw new Error('Escolha o técnico e informe as datas inicial e final.');
+      if (ate < de) throw new Error('A data final não pode ser anterior à inicial.');
+      const {error} = await sb.from('ausencia').insert({tecnico_id: t, data_inicio: de, data_fim: ate, tipo: $('#a_tipo').value, observacao: nz($('#a_obs').value)}); if (error) throw error;
+      toast('Ausência cadastrada.', 'good');
+    } else {
+      if (!twoStep(b, 'Clique de novo: excluir')) return;
+      const tb = b.dataset.fdel ? 'feriado' : 'ausencia', id = b.dataset.fdel || b.dataset.adel;
+      const {error} = await sb.from(tb).delete().eq('id', id); if (error) throw error;
+      toast('Excluído.', 'good');
+    }
+    await loadAll();
+  } catch (err) { showErr(err); }
+});
+
+/* ---------- Gestão da manutenção: OS vencidas, aderência, paradas, qualidade ---------- */
+function gInit() {
+  if (S.g) return;
+  const t = todayIso();
+  S.g = {tab: 'atrasos', grupo: '', tec: '', flag: 'problemas',
+    de: {ader: addDays(t, -90), par: addDays(t, -90), qual: t.slice(0, 8) + '01'}, ate: {ader: t, par: t, qual: t}};
+}
+const gGrpOpts = () => optList(S.grupos.map(g => [g.id, g.nome]), S.g.grupo, 'Todos os grupos');
+const gTecOpts = () => optList([...S.tecnicos.map(t => [t.id, t.nome]), ['none', 'Sem técnico']], S.g.tec, 'Todos os técnicos');
+const gDates = () => `<label>De <input type="date" data-gf="de" value="${S.g.de[S.g.tab]}"></label><label>Até <input type="date" data-gf="ate" value="${S.g.ate[S.g.tab]}"></label>`;
+const gOkEq = id => !S.g.grupo || S.eqById.get(id)?.grupo_id === S.g.grupo;
+const gOkTec = id => !S.g.tec || (S.g.tec === 'none' ? !id : id === S.g.tec);
+const kpiHtml = list => `<div class="kpis">${list.map(([v, t]) => `<div class="kpi"><b>${v}</b><span>${t}</span></div>`).join('')}</div>`;
+
+function gAtrasos() {
+  const now = Date.now();
+  const rows = S.os.filter(o => o.status !== 'concluida' && o.data_limite && new Date(o.data_limite) < now && gOkEq(o.equipamento_id) && gOkTec(o.tecnico_id))
+    .map(o => ({o, ms: now - new Date(o.data_limite)})).sort((a, b) => b.ms - a.ms);
+  const abertas = S.os.filter(o => o.status !== 'concluida').length;
+  const txt = ms => ms >= 86400000 ? Math.floor(ms / 86400000) + ' d' : Math.floor(ms / 3600000) + ' h';
+  return `<div class="sub" style="padding-left:0"><label>Grupo <select data-gf="grupo">${gGrpOpts()}</select></label><label>Técnico <select data-gf="tec">${gTecOpts()}</select></label></div>` +
+    kpiHtml([[rows.length, 'OS abertas fora do prazo'], [abertas, 'OS abertas no total'], [rows.length ? txt(rows[0].ms) : '—', 'Maior atraso'], [rows.filter(r => !r.o.tecnico_id).length, 'Sem técnico']]) +
+    '<table><thead><tr><th>Nº</th><th>Equip.</th><th>Grupo</th><th>Técnico</th><th>Tipo</th><th>Prioridade</th><th>Prazo</th><th class="num">Atraso</th></tr></thead><tbody>' +
+    (rows.map(({o, ms}) => { const e = S.eqById.get(o.equipamento_id); return `<tr data-gos="${o.id}"><td class="mono">${esc(o.numero)}</td><td class="mono">${esc(e?.codigo || '—')}</td><td>${esc(S.grpById.get(e?.grupo_id)?.nome || '—')}</td><td>${esc(S.tecById.get(o.tecnico_id)?.nome || 'sem técnico')}</td><td>${esc(L.tipo[o.tipo] || o.tipo)}</td><td>${esc(L.prio[o.prioridade] || o.prioridade)}</td><td>${esc(fmtDT(o.data_limite))}</td><td class="num"><b>${txt(ms)}</b></td></tr>`; }).join('')
+      || '<tr><td colspan="8" class="empty" style="cursor:default">Nenhuma OS aberta fora do prazo.</td></tr>') +
+    '</tbody></table><div class="note">Prazo = data limite da própria OS (abertura + SLA, hoje 24 h para todas). Clique numa linha para abrir a OS.</div>';
+}
+
+function gAder() {
+  const {de, ate} = {de: S.g.de.ader, ate: S.g.ate.ader};
+  const prev = S.os.filter(o => o.tipo === 'preventiva' && o.status === 'concluida' && o.data_conclusao && inRange(o.data_conclusao, de, ate) && gOkEq(o.equipamento_id));
+  const ok = o => o.data_limite && new Date(o.data_conclusao) <= new Date(o.data_limite);
+  const dias = o => (new Date(o.data_conclusao) - new Date(o.data_abertura)) / 86400000;
+  const agg = list => ({n: list.length, ok: list.filter(ok).length, d: list.length ? list.reduce((s, o) => s + dias(o), 0) / list.length : null});
+  const pc = a => a.n ? Math.round(100 * a.ok / a.n) + '%' : '—';
+  const by = new Map(); prev.forEach(o => { const g = S.eqById.get(o.equipamento_id)?.grupo_id || '—'; if (!by.has(g)) by.set(g, []); by.get(g).push(o); });
+  const byM = new Map(); prev.forEach(o => { const k = dayKey(o.data_conclusao).slice(0, 7); if (!byM.has(k)) byM.set(k, []); byM.get(k).push(o); });
+  const T = agg(prev), row = (nome, list) => { const a = agg(list); return `<tr style="cursor:default"><td>${esc(nome)}</td><td class="num">${a.n}</td><td class="num">${a.ok}</td><td class="num"><b>${pc(a)}</b></td><td class="num">${nf1(a.d)}</td></tr>`; };
+  const abertasVenc = S.os.filter(o => o.tipo === 'preventiva' && o.status !== 'concluida' && o.data_limite && new Date(o.data_limite) < Date.now() && gOkEq(o.equipamento_id)).length;
+  const head = '<thead><tr><th>__</th><th class="num">Concluídas</th><th class="num">No prazo</th><th class="num">% no prazo</th><th class="num">Dias até concluir</th></tr></thead>';
+  return `<div class="sub" style="padding-left:0"><label>Grupo <select data-gf="grupo">${gGrpOpts()}</select></label>${gDates()}</div>` +
+    kpiHtml([[T.n, 'Preventivas concluídas'], [pc(T), 'Concluídas no prazo (SLA da OS)'], [nf1(T.d), 'Dias médios até concluir'], [abertasVenc, 'Preventivas abertas fora do prazo']]) +
+    `<table>${head.replace('__', 'Grupo')}<tbody>${[...by.entries()].sort((a, b) => b[1].length - a[1].length).map(([g, l]) => row(S.grpById.get(g)?.nome || '—', l)).join('') || '<tr><td colspan="5" class="empty" style="cursor:default">Sem preventivas concluídas no período.</td></tr>'}</tbody></table>` +
+    `<table style="margin-top:10px">${head.replace('__', 'Mês de conclusão')}<tbody>${[...byM.entries()].sort().map(([k, l]) => row(k.slice(5) + '/' + k.slice(0, 4), l)).join('')}</tbody></table>` +
+    '<div class="note">“No prazo” = concluída até a data limite da OS (abertura + SLA de 24 h). Como todas as OS têm 24 h, o indicador mostra a rapidez de execução depois da abertura, não o cumprimento da data do plano preventivo.</div>';
+}
+
+function gPar() {
+  const {de, ate} = {de: S.g.de.par, ate: S.g.ate.par};
+  const m = new Map(); const get = id => { if (!m.has(id)) m.set(id, {falhas: 0, min: 0, abertas: 0}); return m.get(id); };
+  S.os.filter(o => o.tipo === 'corretiva' && inRange(o.data_abertura, de, ate) && gOkEq(o.equipamento_id)).forEach(o => { const g = get(o.equipamento_id); g.falhas++; if (o.status !== 'concluida') g.abertas++; });
+  S.regs.filter(r => r.tipo_manutencao === 'corretiva' && r.data_servico && r.data_servico >= de && r.data_servico <= ate && gOkEq(r.equipamento_id)).forEach(r => { get(r.equipamento_id).min += minutesBetween(r.hora_inicio, r.hora_fim); });
+  const list = [...m.entries()].sort((a, b) => b[1].min - a[1].min || b[1].falhas - a[1].falhas).slice(0, 20);
+  return `<div class="sub" style="padding-left:0"><label>Grupo <select data-gf="grupo">${gGrpOpts()}</select></label>${gDates()}</div>` +
+    '<table><thead><tr><th>Equipamento</th><th>Grupo</th><th class="num">OS corretivas</th><th class="num">Abertas agora</th><th class="num">Horas de corretiva</th></tr></thead><tbody>' +
+    (list.map(([id, v]) => { const e = S.eqById.get(id); return `<tr style="cursor:default"><td><b class="mono">${esc(e?.codigo || '')}</b> <span class="muted">${esc(e?.nome || '')}</span></td><td>${esc(S.grpById.get(e?.grupo_id)?.nome || '—')}</td><td class="num">${v.falhas}</td><td class="num">${v.abertas}</td><td class="num"><b>${nf1(v.min / 60)}</b></td></tr>`; }).join('')
+      || '<tr><td colspan="5" class="empty" style="cursor:default">Sem corretivas no período.</td></tr>') +
+    '</tbody></table><div class="note">Top 20 por horas de manutenção corretiva registradas (registros do tipo corretiva) e nº de OS corretivas abertas no período. A criticidade cadastrada ainda não diferencia os equipamentos (quase todos “média”), por isso o ranking usa horas e falhas.</div>';
+}
+
+// qualidade dos registros: sinaliza o que distorce os indicadores (sem apontar culpados)
+function gQualData() {
+  const {de, ate} = {de: S.g.de.qual, ate: S.g.ate.qual};
+  const regs = S.regs.filter(r => r.data_servico && r.data_servico >= de && r.data_servico <= ate && gOkEq(r.equipamento_id) && gOkTec(r.tecnico_id));
+  const dia = new Map();
+  regs.forEach(r => { const k = r.tecnico_id + '|' + r.data_servico; dia.set(k, (dia.get(k) || 0) + minutesBetween(r.hora_inicio, r.hora_fim)); });
+  const lim = d => { const w = new Date(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)).getDay(); return w === 6 ? 240 : w === 0 ? 0 : 480; };
+  const out = regs.map(r => {
+    const f = [], m = minutesBetween(r.hora_inicio, r.hora_fim);
+    if (!r.ordem_servico_id) f.push('sem_os');
+    if (!r.hora_inicio || !r.hora_fim || m <= 0) f.push('sem_horas');
+    const tot = dia.get(r.tecnico_id + '|' + r.data_servico) || 0, l = lim(r.data_servico);
+    if (l && tot > l) f.push('acima');
+    return {r, f, m};
+  });
+  return out;
+}
+const FLAG_L = {sem_os: 'Sem OS', sem_horas: 'Sem horas válidas', acima: 'Dia acima da jornada'};
+function gQual() {
+  const all = gQualData(), fl = S.g.flag;
+  const cnt = k => all.filter(x => x.f.includes(k)).length;
+  const show = all.filter(x => fl === 'todos' ? true : fl === 'problemas' ? x.f.length : x.f.includes(fl)).sort((a, b) => b.r.data_servico.localeCompare(a.r.data_servico) || (b.r.hora_inicio || '').localeCompare(a.r.hora_inicio || ''));
+  const cut = show.slice(0, 200);
+  const flOpts = optList([['problemas', 'Qualquer problema'], ['sem_os', 'Sem OS'], ['sem_horas', 'Sem horas válidas'], ['acima', 'Dia acima da jornada'], ['todos', 'Todos os registros']], fl);
+  const pct = all.length ? Math.round(100 * cnt('sem_os') / all.length) : 0;
+  return `<div class="sub" style="padding-left:0"><label>Grupo <select data-gf="grupo">${gGrpOpts()}</select></label><label>Técnico <select data-gf="tec">${gTecOpts()}</select></label>${gDates()}<label>Mostrar <select data-gf="flag">${flOpts}</select></label></div>` +
+    kpiHtml([[all.length, 'Registros no período'], [`${cnt('sem_os')} (${pct}%)`, 'Sem OS vinculada'], [cnt('sem_horas'), 'Sem horas válidas'], [cnt('acima'), 'Em dia acima da jornada']]) +
+    '<table><thead><tr><th>Data</th><th>Técnico</th><th>Equip.</th><th>Tipo</th><th class="num">Horas</th><th>Descrição</th><th>Sinal</th><th class="nox">Vincular à OS</th></tr></thead><tbody>' +
+    (cut.map(({r, f, m}) => {
+      const e = S.eqById.get(r.equipamento_id);
+      const cand = f.includes('sem_os') ? S.os.filter(o => o.equipamento_id === r.equipamento_id && o.status !== 'concluida') : [];
+      const act = cand.length ? `<select data-lksel="${r.id}" style="min-width:128px">${cand.map(o => `<option value="${o.id}">${esc(o.numero)} · ${esc(L.tipo[o.tipo] || o.tipo)}</option>`).join('')}</select> <button type="button" class="btn" data-lk="${r.id}">Vincular</button>` : '';
+      return `<tr style="cursor:default"><td class="mono">${fmtDia(r.data_servico).slice(0, 5)} <span class="muted">${dowOf(r.data_servico)}</span></td><td>${esc(S.tecById.get(r.tecnico_id)?.nome || '—')}</td><td class="mono">${esc(e?.codigo || '—')}</td><td>${esc(L.tipo[r.tipo_manutencao] || r.tipo_manutencao || '')}</td><td class="num">${nf1(m / 60)}</td><td class="ell" style="max-width:220px" title="${esc(r.descricao || '')}">${esc(r.descricao || '')}</td><td>${f.map(k => `<span class="badge b-em_execucao">${FLAG_L[k]}</span>`).join(' ')}</td><td class="nox">${act}</td></tr>`;
+    }).join('') || '<tr><td colspan="8" class="empty" style="cursor:default">Nada a mostrar neste filtro.</td></tr>') +
+    `</tbody></table><div class="note">${show.length > 200 ? `Mostrando 200 de ${show.length}. ` : ''}Sinais são avisos, não erros: “sem OS” = registro sem ordem vinculada (conta como corretiva); “dia acima da jornada” = mais de 8 h (seg–sex) ou 4 h (sábado) somadas no dia do técnico. Vincular só oferece OS abertas do mesmo equipamento.</div>`;
+}
+
+function renderGestao() {
+  gInit();
+  const g = S.g, st = $('#dlgBody').scrollTop;
+  const tabs = [['atrasos', 'OS fora do prazo'], ['ader', 'Aderência preventiva'], ['par', 'Maiores paradas'], ['qual', 'Qualidade dos registros']];
+  const head = `<div class="tabs gt">${tabs.map(([k, l]) => `<button type="button" data-gt="${k}" class="${g.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  const content = {atrasos: gAtrasos, ader: gAder, par: gPar, qual: gQual}[g.tab]();
+  openModal({title: 'Gestão da manutenção', body: '<div class="full">' + head + '<div class="gcont">' + content + '</div></div>', wide: true, closeLabel: 'Fechar',
+    actions: [{label: '⬇ Excel (CSV)', run: async () => { const t = $('#dlgBody .gcont table'); if (!t) throw new Error('Nada para exportar.'); tableCsv(t, `gestao_${g.tab}_${todayIso()}.csv`); }}]});
+  $('#dlgBody').scrollTop = st;
+}
+$('#btnGestao').addEventListener('click', () => { gInit(); renderGestao(); });
+$('#dlgBody').addEventListener('click', async e => {
+  const t = e.target.closest('[data-gt]');
+  if (t) { gInit(); S.g.tab = t.dataset.gt; renderGestao(); return; }
+  const lk = e.target.closest('[data-lk]');
+  if (lk) {
+    if (!twoStep(lk, 'Clique de novo')) return;
+    try {
+      const os = $(`[data-lksel="${lk.dataset.lk}"]`).value;
+      const {data, error} = await sb.from('registro_manutencao').update({ordem_servico_id: os}).eq('id', lk.dataset.lk).select('id');
+      if (error) throw error;
+      if (!data?.length) throw new Error('Sem permissão para alterar este registro.');
+      toast('Registro vinculado à OS.', 'good'); await loadAll();
+    } catch (err) { showErr(err); }
+    return;
+  }
+  const go = e.target.closest('[data-gos]'); if (go) openOS(go.dataset.gos);
+});
+$('#dlgBody').addEventListener('change', e => {
+  const f = e.target.closest('[data-gf]'); if (!f || !S.g) return;
+  const k = f.dataset.gf;
+  if (k === 'de' || k === 'ate') S.g[k][S.g.tab] = f.value; else S.g[k] = f.value;
+  renderGestao();
+});
+
+// janelas abertas acompanham os dados após recarregar
+function refreshDialogs() {
+  if (!$('#dlg').open) return;
+  const t = $('#dlgTitle').textContent;
+  if (t === 'Equipe e calendário') openEquipe();
+  else if (t === 'Gestão da manutenção') renderGestao();
+}
+
+/* ---------- exportar tabelas ---------- */
+$('#btnPExp').addEventListener('click', () => tableCsv($('#tabProd table'), `produtividade_${todayIso()}.csv`));
+$('#btnOSExp').addEventListener('click', () => tableCsv($('#osBody').closest('table'), `ordens_de_servico_${todayIso()}.csv`));
+
+/* ---------- impressão em lote (junta os PDFs das OS marcadas num arquivo só) ---------- */
+S.sel = new Set();
+function updSel() {
+  const n = S.sel.size, b = $('#btnPrintSel');
+  b.hidden = !n; b.textContent = `🖨 Imprimir ${n} selecionada${n > 1 ? 's' : ''}`;
+}
+async function printMany() {
+  const nums = S.os.filter(o => S.sel.has(o.id)).map(o => o.numero).sort((a, b) => Number(a) - Number(b));
+  if (!nums.length) return;
+  if (nums.length > 40) throw new Error('Selecione no máximo 40 OS por vez.');
+  if (!window.PDFLib) throw new Error('Biblioteca de PDF não carregada. Recarregue a página e tente de novo.');
+  const w = window.open('', '_blank');
+  const msg = t => { if (w && !w.closed) { try { w.document.body.innerHTML = '<p style="font:14px sans-serif;padding:16px">' + t + '</p>'; } catch (_) {} } };
+  try {
+    const {data: {session}} = await sb.auth.getSession();
+    if (!session) throw new Error('Sessão expirada. Entre novamente.');
+    const out = await PDFLib.PDFDocument.create();
+    for (let i = 0; i < nums.length; i++) {
+      msg(`Gerando OS ${esc(nums[i])} (${i + 1} de ${nums.length})…`);
+      const buf = await fetchOSPdf(nums[i], session);
+      const src = await PDFLib.PDFDocument.load(buf);
+      (await out.copyPages(src, src.getPageIndices())).forEach(p => out.addPage(p));
+    }
+    const bytes = await out.save();
+    const nome = nums.length === 1 ? `${nums[0]}.pdf` : `OS_${nums[0]}_a_${nums[nums.length - 1]}.pdf`;
+    showPdf(w, bytes, nome, `${nums.length} OS`);
+    S.sel.clear(); renderOS();
+  } catch (e) { if (w && !w.closed) w.close(); throw e; }
+}
+$('#btnPrintSel').addEventListener('click', () => printMany().catch(err => toast(err.message || String(err), 'bad')));
+$('#osBody').addEventListener('change', e => {
+  const c = e.target.closest('[data-sel]'); if (!c) return;
+  c.checked ? S.sel.add(c.dataset.sel) : S.sel.delete(c.dataset.sel); updSel();
+});
+$('#osAll').addEventListener('change', e => {
+  $$('#osBody [data-sel]').forEach(c => { c.checked = e.target.checked; e.target.checked ? S.sel.add(c.dataset.sel) : S.sel.delete(c.dataset.sel); }); updSel();
+});
 
 /* ---- não conformidades (itens do checklist marcados “Não OK”) ---- */
 function renderNC() {
@@ -680,12 +957,14 @@ function renderOS() {
   $('#osBody').innerHTML = rows.map(o => {
     const e = S.eqById.get(o.equipamento_id), t = S.tecById.get(o.tecnico_id);
     return `<tr data-os="${o.id}" class="${o.id === S.regOS ? 'sel' : ''}" title="${esc((o.titulo || '') + ' · Prioridade: ' + (L.prio[o.prioridade] || o.prioridade))}">
+      <td class="nox pcell"><input type="checkbox" data-sel="${o.id}"${S.sel.has(o.id) ? ' checked' : ''}></td>
       <td class="mono">${esc(o.numero || '—')}</td>
       <td class="mono">${esc(e?.codigo || e?.nome || '—')}</td>
       <td class="ell">${t ? esc(t.nome) : '<span class="muted">sem técnico</span>'}</td>
       <td><span class="badge b-${o.status}">${esc(L.os[o.status] || o.status)}</span></td>
-      <td class="pcell"><button type="button" class="pbtn" data-print="${esc(o.numero || '')}" title="Imprimir OS ${esc(o.numero || '')}">🖨</button></td></tr>`;
-  }).join('') || '<tr><td colspan="5" class="empty">Nenhuma ordem de serviço neste filtro.</td></tr>';
+      <td class="pcell nox"><button type="button" class="pbtn" data-print="${esc(o.numero || '')}" title="Imprimir OS ${esc(o.numero || '')}">🖨</button></td></tr>`;
+  }).join('') || '<tr><td colspan="6" class="empty">Nenhuma ordem de serviço neste filtro.</td></tr>';
+  $('#osAll').checked = false; updSel();
 }
 
 /* ---- registros de manutenção da OS sob o cursor (view vw_registro_manutencao_detalhado) ---- */
@@ -887,37 +1166,43 @@ function fechamentoErro(r) {
 }
 
 /* ---- impressão da OS (edge function gerar-os-pdf, via proxy com CORS gerar-os-pdf-web) ---- */
+async function fetchOSPdf(numero, session) {
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/gerar-os-pdf-web`, {
+    method: 'POST',
+    headers: {Authorization: 'Bearer ' + session.access_token, apikey: SUPABASE_KEY, 'Content-Type': 'application/json'},
+    body: JSON.stringify({os_numero: String(numero)})
+  });
+  if (!resp.ok) {
+    let m = ''; try { const j = await resp.json(); m = j.error || ''; } catch (_) {}
+    throw new Error(`Não foi possível gerar o PDF da OS ${numero}` + (m ? ': ' + m : ` (HTTP ${resp.status})`));
+  }
+  return await resp.arrayBuffer();
+}
+// mostra o PDF na aba aberta no clique, com botões Baixar (nome = número da OS) e Imprimir
+function showPdf(w, bytes, nome, titulo) {
+  const url = URL.createObjectURL(new Blob([bytes], {type: 'application/pdf'}));
+  if (w && !w.closed) {
+    // um blob aberto direto salvaria com nome aleatório (uuid): a aba oferece Baixar/Imprimir com o nome certo
+    const d = w.document; d.open();
+    d.write(`<!doctype html><meta charset="utf-8"><title>${esc(nome.replace(/\.pdf$/, ''))}</title>
+<style>html,body{margin:0;height:100%;font:14px system-ui,sans-serif}body{display:flex;flex-direction:column}
+.bar{display:flex;gap:8px;align-items:center;padding:8px 12px;background:#0f766e;color:#fff}
+.bar a,.bar button{background:#fff;color:#0f172a;border:0;border-radius:6px;padding:6px 12px;font-weight:600;cursor:pointer;text-decoration:none;font-size:13px}
+iframe{flex:1;border:0;width:100%}</style>
+<div class="bar"><b>OS ${esc(String(titulo))}</b><span style="flex:1"></span><a href="${url}" download="${esc(nome)}">Baixar ${esc(nome)}</a><button id="p">Imprimir</button></div>
+<iframe id="f" src="${url}"></iframe>`);
+    d.close();
+    d.getElementById('p').onclick = () => { try { d.getElementById('f').contentWindow.focus(); d.getElementById('f').contentWindow.print(); } catch (_) { w.print(); } };
+  } else { const a = document.createElement('a'); a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove(); }
+  setTimeout(() => URL.revokeObjectURL(url), 600000);
+}
 async function printOS(numero, win) {
   const w = win || window.open('', '_blank');
   if (w) { try { w.document.title = 'OS ' + numero; w.document.body.innerHTML = '<p style="font:14px sans-serif;padding:16px">Gerando PDF da OS ' + esc(String(numero)) + '…</p>'; } catch (_) {} }
   try {
     const {data: {session}} = await sb.auth.getSession();
     if (!session) throw new Error('Sessão expirada. Entre novamente.');
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/gerar-os-pdf-web`, {
-      method: 'POST',
-      headers: {Authorization: 'Bearer ' + session.access_token, apikey: SUPABASE_KEY, 'Content-Type': 'application/json'},
-      body: JSON.stringify({os_numero: String(numero)})
-    });
-    if (!resp.ok) {
-      let m = ''; try { const j = await resp.json(); m = j.error || ''; } catch (_) {}
-      throw new Error(`Não foi possível gerar o PDF da OS ${numero}` + (m ? ': ' + m : ` (HTTP ${resp.status})`));
-    }
-    const url = URL.createObjectURL(new Blob([await resp.arrayBuffer()], {type: 'application/pdf'}));
-    const nome = `${String(numero).replace(/[^\w.-]/g, '_')}.pdf`;   // arquivo = número da OS (ex.: 21679.pdf)
-    if (w && !w.closed) {
-      // um blob aberto direto salvaria com nome aleatório (uuid): a aba mostra o PDF e oferece Baixar/Imprimir com o nome certo
-      const d = w.document; d.open();
-      d.write(`<!doctype html><meta charset="utf-8"><title>${esc(nome.replace(/\.pdf$/, ''))}</title>
-<style>html,body{margin:0;height:100%;font:14px system-ui,sans-serif}body{display:flex;flex-direction:column}
-.bar{display:flex;gap:8px;align-items:center;padding:8px 12px;background:#0f766e;color:#fff}
-.bar a,.bar button{background:#fff;color:#0f172a;border:0;border-radius:6px;padding:6px 12px;font-weight:600;cursor:pointer;text-decoration:none;font-size:13px}
-iframe{flex:1;border:0;width:100%}</style>
-<div class="bar"><b>OS ${esc(String(numero))}</b><span style="flex:1"></span><a href="${url}" download="${esc(nome)}">Baixar ${esc(nome)}</a><button id="p">Imprimir</button></div>
-<iframe id="f" src="${url}"></iframe>`);
-      d.close();
-      d.getElementById('p').onclick = () => { try { d.getElementById('f').contentWindow.focus(); d.getElementById('f').contentWindow.print(); } catch (_) { w.print(); } };
-    } else { const a = document.createElement('a'); a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove(); }
-    setTimeout(() => URL.revokeObjectURL(url), 600000);
+    showPdf(w, await fetchOSPdf(numero, session), `${String(numero).replace(/[^\w.-]/g, '_')}.pdf`, numero);
   } catch (e) { if (w && !w.closed) w.close(); throw e; }
 }
 
@@ -1229,13 +1514,15 @@ function renderProd() {
     if (!isMei(r.tecnico_id)) diasClt.add(r.data_servico);
     else { if (!diasMei.has(r.tecnico_id)) diasMei.set(r.tecnico_id, new Set()); diasMei.get(r.tecnico_id).add(r.data_servico); }
   });
-  let dispClt = 0; diasClt.forEach(d => { dispClt += minDia(d); });
+  const feriados = new Set((S.feriados || []).map(f => f.data));
+  const emAus = (id, d) => (S.ausencias || []).some(a => a.tecnico_id === id && d >= a.data_inicio && d <= a.data_fim);
   const dispMin = id => {
-    if (!isMei(id)) return dispClt;
-    const meus = diasMei.get(id); if (!meus || !meus.size) return 0;
-    const ini = [...meus].sort()[0], fim = p.ate && p.ate < hoje ? p.ate : hoje;
-    let m = 0; const dias = new Set([...diasClt, ...meus]);
-    dias.forEach(d => { if (d >= ini && d <= fim) m += minDia(d); });
+    let dias, ini = '';
+    const fim = p.ate && p.ate < hoje ? p.ate : hoje;
+    if (isMei(id)) { const meus = diasMei.get(id); if (!meus || !meus.size) return 0; ini = [...meus].sort()[0]; dias = new Set([...diasClt, ...meus]); }
+    else dias = diasClt;
+    let m = 0;
+    dias.forEach(d => { if (d >= ini && d <= fim && !feriados.has(d) && !emAus(id, d)) m += minDia(d); });
     return m;
   };
   regs.forEach(r => { const g = get(r.tecnico_id), m = mins(r); g.regs++; g.min += m; if (r.tipo_manutencao === 'preventiva') g.prev += m; else if (r.tipo_manutencao === 'corretiva') g.corr += m; });
@@ -1249,7 +1536,7 @@ function renderProd() {
   }
   const semOs = regs.filter(r => !r.ordem_servico_id).length;
   $('#pNote').textContent = regs.length
-    ? `Produtividade = horas registradas ÷ horas disponíveis (seg–sex 8 h, sábado 4 h, domingo 0). Dias de trabalho = dias em que a equipe registrou (dia sem registro de ninguém = feriado). CLT: todos esses dias; se faltou, a produtividade cai. MEI: a partir do 1º registro dele no período. Pode passar de 100%. ${semOs} de ${regs.length} registros (${Math.round(100 * semOs / regs.length)}%) não têm OS vinculada: contam nas horas, mas não em “OS conc.”. Por isso um técnico pode ter muitas horas e poucas OS concluídas.`
+    ? `Produtividade = horas registradas ÷ horas disponíveis (seg–sex 8 h, sábado 4 h, domingo 0). Dias de trabalho = dias em que a equipe registrou (dia sem registro de ninguém = feriado); feriados e ausências cadastrados em “Equipe e calendário” são descontados. CLT: todos esses dias; se faltou, a produtividade cai. MEI: a partir do 1º registro dele no período. Pode passar de 100%. ${semOs} de ${regs.length} registros (${Math.round(100 * semOs / regs.length)}%) não têm OS vinculada: contam nas horas, mas não em “OS conc.”. Por isso um técnico pode ter muitas horas e poucas OS concluídas.`
     : '';
 }
 
