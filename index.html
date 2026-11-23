@@ -188,6 +188,8 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
 .ask{margin-top:10px;padding:9px 12px;border-radius:8px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:13px}
 .tot td{border-top:2px solid var(--ink);background:var(--soft)}
 .gt{flex-wrap:wrap;margin-bottom:8px}
+.dayacts{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px}
+.dia-it{display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px;cursor:pointer}
 .gcont .sub{margin:0 -4px}
 .pcell{width:34px;text-align:center;padding:0 4px}
 .pbtn{border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer;font-size:13px;line-height:1;padding:3px 6px}
@@ -859,12 +861,14 @@ function updSel() {
   const n = S.sel.size, b = $('#btnPrintSel');
   b.hidden = !n; b.textContent = `🖨 Imprimir ${n} selecionada${n > 1 ? 's' : ''}`;
 }
-async function printMany() {
-  const nums = S.os.filter(o => S.sel.has(o.id)).map(o => o.numero).sort((a, b) => Number(a) - Number(b));
+async function printMany() { return printNums(S.os.filter(o => S.sel.has(o.id)).map(o => o.numero), null, true); }
+// junta os PDFs das OS informadas num arquivo só; win = aba já aberta no clique (opcional)
+async function printNums(numeros, win, limpaSel = false) {
+  const nums = numeros.slice().sort((a, b) => Number(a) - Number(b));
   if (!nums.length) return;
   if (nums.length > 40) throw new Error('Selecione no máximo 40 OS por vez.');
   if (!window.PDFLib) throw new Error('Biblioteca de PDF não carregada. Recarregue a página e tente de novo.');
-  const w = window.open('', '_blank');
+  const w = win || window.open('', '_blank');
   const msg = t => { if (w && !w.closed) { try { w.document.body.innerHTML = '<p style="font:14px sans-serif;padding:16px">' + t + '</p>'; } catch (_) {} } };
   try {
     const {data: {session}} = await sb.auth.getSession();
@@ -879,7 +883,7 @@ async function printMany() {
     const bytes = await out.save();
     const nome = nums.length === 1 ? `${nums[0]}.pdf` : `OS_${nums[0]}_a_${nums[nums.length - 1]}.pdf`;
     showPdf(w, bytes, nome, `${nums.length} OS`);
-    S.sel.clear(); renderOS();
+    if (limpaSel) { S.sel.clear(); renderOS(); }
   } catch (e) { if (w && !w.closed) w.close(); throw e; }
 }
 $('#btnPrintSel').addEventListener('click', () => printMany().catch(err => toast(err.message || String(err), 'bad')));
@@ -1247,6 +1251,37 @@ function openNewOS(pre = {}) {
   $('#n_eq').addEventListener('input', ev => { const e = S.eqByCod.get(ev.target.value.trim().toUpperCase()); $('#n_eqn').textContent = e ? e.nome : ''; });
 }
 
+// abre as OS preventivas de todos os equipamentos de um dia do calendário, de uma vez (tudo ou nada)
+function openDia(k) {
+  const abre = o => S.os.find(x => x.equipamento_id === o.equipamento_id && x.plano_id === o.plano_id && x.status !== 'concluida');
+  const list = calEvents().filter(e => dayKey(e.proxima_manutencao) === k && !abre(e));
+  if (!list.length) { toast('Todas as OS deste dia já estão abertas.', 'good'); return; }
+  const [yy, mm, dd] = k.split('-');
+  const body = `<div class="full hint muted">Cada OS sai no mesmo padrão do botão individual: título = nome do plano, descrição “PREVENTIVA”, prioridade baixa. Equipamentos que já têm OS aberta ficam de fora. As OS são criadas todas juntas; se uma falhar, nenhuma é criada.</div>` +
+    fld('Técnico (opcional, vale para todas)', `<select id="d_tec">${tecOptions('')}</select>`) +
+    `<div class="full"><label>Equipamentos (${list.length}) <span class="muted">· desmarque os que não quiser abrir</span></label>` +
+    list.map(e => `<label class="dia-it"><input type="checkbox" data-dia="${e.equipamento_id}" checked> <b class="mono">${esc(e.equipamento_codigo || '')}</b> ${esc(e.equipamento_nome || '')} <span class="muted">· ${esc(S.planoById.get(e.plano_id)?.nome || 'sem plano')}</span></label>`).join('') + '</div>';
+  const criar = async imprimir => {
+    const ids = $$('#dlgBody [data-dia]').filter(c => c.checked).map(c => c.dataset.dia);
+    if (!ids.length) throw new Error('Marque pelo menos um equipamento.');
+    if (imprimir && ids.length > 40) throw new Error('Para imprimir, marque no máximo 40 equipamentos.');
+    const win = imprimir ? window.open('', '_blank') : null;
+    try {
+      const tec = $('#d_tec').value || null;
+      const rows = ids.map(id => { const e = list.find(x => x.equipamento_id === id); return {equipamento_id: id, tipo: 'preventiva', status: 'aberta', prioridade: 'baixa', tecnico_id: tec, titulo: nz(S.planoById.get(e.plano_id)?.nome), descricao: 'PREVENTIVA', plano_id: e.plano_id}; });
+      const {data, error} = await sb.from('ordem_servico').insert(rows).select('id,numero');
+      if (error) throw error;
+      closeModal();
+      toast(`${data.length} OS abertas.`, 'good');
+      await loadAll();
+      if (imprimir) await printNums(data.map(o => o.numero), win);
+    } catch (e) { if (win && !win.closed) win.close(); throw e; }
+  };
+  openModal({title: `Abrir OS do dia ${dd}/${mm}/${yy}`, body, wide: true, actions: [
+    {label: 'Abrir as OS', cls: 'pri', confirm: 'Abrir as OS marcadas? Elas não podem ser apagadas em lote depois.', confirmLabel: 'Confirmar: abrir', run: () => criar(false)},
+    {label: 'Abrir e imprimir juntas', cls: 'pri', confirm: 'Abrir as OS marcadas e gerar um PDF único? Elas não podem ser apagadas em lote depois.', confirmLabel: 'Confirmar: abrir e imprimir', run: () => criar(true)}]});
+}
+
 /* ====================================================================
    CALENDÁRIO (centro)
    ==================================================================== */
@@ -1297,7 +1332,10 @@ function renderDayDetail(by) {
   const order = {atrasado: 0, proximo: 1, ok: 2};
   const list = (by.get(k) || []).slice().sort((a, b) => order[a.status_manutencao] - order[b.status_manutencao]);
   const [yy, mm, dd] = k.split('-');
-  box.innerHTML = `<h4>${dd}/${mm}/${yy} — ${list.length} equipamento(s)</h4>` +
+  const abre = o => S.os.find(x => x.equipamento_id === o.equipamento_id && x.plano_id === o.plano_id && x.status !== 'concluida');
+  const faltam = list.filter(e => !abre(e)), jaOs = list.map(abre).filter(Boolean);
+  const dayBar = (faltam.length || jaOs.length) ? `<div class="dayacts">${faltam.length ? `<button type="button" class="btn pri" data-opendia="${k}">＋ Abrir todas as OS do dia (${faltam.length})</button>` : ''}${jaOs.length ? `<button type="button" class="btn" data-printdia="${k}">🖨 Imprimir as OS do dia (${jaOs.length})</button>` : ''}</div>` : '';
+  box.innerHTML = `<h4>${dd}/${mm}/${yy} — ${list.length} equipamento(s)</h4>` + dayBar +
     (list.map(e => `<div class="ev"><i class="lg lg-${e.status_manutencao}"></i>
       <div class="t"><b class="mono">${esc(e.equipamento_codigo || '')}</b> ${esc(e.equipamento_nome || '')}<br><small>${esc(e.grupo_nome || '')} · a cada ${e.periodicidade_dias ?? '—'} dias · última: ${esc(fmtDate(e.ultima_manutencao))}</small></div>
       <small>${esc(L.cal[e.status_manutencao] || '')}<br>${e.dias_restantes != null ? (e.dias_restantes < 0 ? Math.abs(e.dias_restantes) + ' d de atraso' : e.dias_restantes + ' d restantes') : ''}</small>${evAction(e)}</div>`).join('')
@@ -1314,6 +1352,12 @@ $('#calDays').addEventListener('click', e => {
 const moveMonth = n => { const m = S.f.cal.month; S.f.cal.month = new Date(m.getFullYear(), m.getMonth() + n, 1); renderCal(); };
 $('#calDetail').addEventListener('click', e => {
   const n = e.target.closest('[data-newprev]'); if (n) { openNewOS({equipId: n.dataset.newprev}); return; }
+  const od = e.target.closest('[data-opendia]'); if (od) { openDia(od.dataset.opendia); return; }
+  const pd = e.target.closest('[data-printdia]'); if (pd) {
+    const k = pd.dataset.printdia, nums = [];
+    (calEvents().filter(x => dayKey(x.proxima_manutencao) === k)).forEach(x => { const o = S.os.find(y => y.equipamento_id === x.equipamento_id && y.plano_id === x.plano_id && y.status !== 'concluida'); if (o) nums.push(o.numero); });
+    printNums(nums).catch(err => toast(err.message || String(err), 'bad')); return;
+  }
   const o = e.target.closest('[data-openos]'); if (o) openOS(o.dataset.openos);
 });
 $('#calPrev').addEventListener('click', () => moveMonth(-1));
