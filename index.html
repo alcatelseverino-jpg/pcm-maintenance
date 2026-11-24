@@ -1554,7 +1554,8 @@ function openGrupo(id) {
       fld('Início da contagem', `<input id="g_ini" type="date" value="${esc(ed.data_inicio_contagem || '')}">`) +
       '<div class="full"><button type="button" class="btn" id="g_sim">Simular efeito da periodicidade</button><div class="hint" id="simOut"></div></div>'
       : (id ? '<div class="full hint muted">Este grupo não tem plano de manutenção ativo, então não há periodicidade para editar aqui.</div>' : '<div class="full hint muted">Ao criar o grupo, o plano de manutenção/periodicidade continua sendo definido como você já faz hoje no GestorPCM.</div>'));
-  openModal({title: id ? `Editar grupo — ${g?.nome}` : 'Novo grupo', body, actions: [{label: 'Salvar', cls: 'pri', run: async () => {
+  const bodyG = body + (id ? '<div class="full"><button type="button" class="btn" id="g_ck">☑ Editar checklist do grupo</button></div>' : '');
+  openModal({title: id ? `Editar grupo — ${g?.nome}` : 'Novo grupo', body: bodyG, actions: [{label: 'Salvar', cls: 'pri', run: async () => {
     const nome = nz($('#g_nome').value); if (!nome) throw new Error('Informe o nome do grupo.');
     const f = {nome, codigo_base: nz($('#g_cod').value), descricao: nz($('#g_desc').value), ativo: $('#g_ativo').checked};
     if (id) {
@@ -1573,6 +1574,8 @@ function openGrupo(id) {
     }
     closeModal(); toast('Grupo salvo.', 'good'); await loadAll();
   }}]});
+  const gck = $('#g_ck');
+  if (gck) gck.addEventListener('click', () => { closeModal(); openChecklist(id, null); });
   const sim = $('#g_sim');
   if (sim) sim.addEventListener('click', async () => {
     const {data, error} = await sb.rpc('editor_salvar_periodicidade_grupo', {p_plano_id: ed.plano_id, p_dias: parseInt($('#g_dias').value, 10), p_data_inicio: $('#g_ini').value || null, p_aplicar: false});
@@ -1597,7 +1600,8 @@ function openEquip(id) {
     `<div class="full chk"><input type="checkbox" id="e_geral"${e?.geral ? ' checked' : ''}><label for="e_geral">Código geral (mão de obra do grupo/serviço — não é máquina, não gera OS preventiva automática)</label></div>` +
     (id ? fld('Periodicidade própria (dias, 1–365)', `<input id="e_dias" type="number" min="1" max="365" value="${row?.periodicidade_propria_dias ?? ''}">`, {hint: `Vazio = usa a do grupo (${row?.periodicidade_grupo_dias ?? '—'} dias).`}) +
       fld('Observação da periodicidade', `<input id="e_obs" value="${esc(row?.observacao_periodicidade || '')}">`) +
-      '<div class="full"><button type="button" class="btn" id="e_sim">Simular periodicidade</button><div class="hint" id="simOut"></div></div>' : '');
+      '<div class="full"><button type="button" class="btn" id="e_sim">Simular periodicidade</button><div class="hint" id="simOut"></div></div>' +
+      '<div class="full"><button type="button" class="btn" id="e_ck">☑ Editar checklist deste equipamento</button></div>' : '');
   openModal({title: id ? `Editar equipamento — ${e?.codigo || e?.nome}` : 'Novo equipamento', wide: true, body, actions: [{label: 'Salvar', cls: 'pri', run: async () => {
     const nome = nz($('#e_nome').value); if (!nome) throw new Error('Informe o nome do equipamento.');
     const f = {codigo: nz($('#e_cod').value), nome, grupo_id: $('#e_grp').value || null, status: $('#e_st').value, criticidade: $('#e_cr').value || null,
@@ -1617,6 +1621,8 @@ function openEquip(id) {
     }
     closeModal(); toast('Equipamento salvo.' + aviso, aviso ? '' : 'good'); await loadAll();
   }}]});
+  const eck = $('#e_ck');
+  if (eck) eck.addEventListener('click', () => { closeModal(); openChecklist(e?.grupo_id ?? S.selGrupo, id); });
   const sim = $('#e_sim');
   if (sim) sim.addEventListener('click', async () => {
     const d = $('#e_dias').value === '' ? null : parseInt($('#e_dias').value, 10);
