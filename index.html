@@ -970,7 +970,7 @@ async function printNums(numeros, win, limpaSel = false) {
       msg(`Gerando OS ${esc(nums[i])} (${i + 1} de ${nums.length})…`);
       const buf = await fetchOSPdf(nums[i], session);
       const src = await PDFLib.PDFDocument.load(buf);
-      (await out.copyPages(src, src.getPageIndices())).forEach(p => out.addPage(p));
+      await addComMargem(out, src);
     }
     const bytes = await out.save();
     const nome = nums.length === 1 ? `${nums[0]}.pdf` : `OS_${nums[0]}_a_${nums[nums.length - 1]}.pdf`;
@@ -1282,6 +1282,22 @@ async function fetchOSPdf(numero, session) {
   return await resp.arrayBuffer();
 }
 // mostra o PDF na aba aberta no clique, com botões Baixar (nome = número da OS) e Imprimir
+// A impressora não imprime até a borda da folha e o PDF da OS usa a página inteira: reduz cada página (centralizada) para sobrar margem de segurança.
+const PDF_ESCALA = 0.94;
+async function addComMargem(out, src) {
+  for (const i of src.getPageIndices()) {
+    let ok = false;
+    try { ok = !!src.getPage(i).node.Contents(); } catch (_) {}
+    if (!ok) { (await out.copyPages(src, [i])).forEach(p => out.addPage(p)); continue; }   // página sem conteúdo: copia como está
+    const [e] = await out.embedPdf(src, [i]), k = PDF_ESCALA, p = out.addPage([e.width, e.height]);
+    p.drawPage(e, {x: e.width * (1 - k) / 2, y: e.height * (1 - k) / 2, xScale: k, yScale: k});
+  }
+}
+async function pdfComMargem(buf) {
+  if (!window.PDFLib) return buf;
+  try { const out = await PDFLib.PDFDocument.create(); await addComMargem(out, await PDFLib.PDFDocument.load(buf)); return await out.save(); }
+  catch (_) { return buf; }
+}
 function showPdf(w, bytes, nome, titulo) {
   const url = URL.createObjectURL(new Blob([bytes], {type: 'application/pdf'}));
   if (w && !w.closed) {
@@ -1305,7 +1321,7 @@ async function printOS(numero, win) {
   try {
     const {data: {session}} = await sb.auth.getSession();
     if (!session) throw new Error('Sessão expirada. Entre novamente.');
-    showPdf(w, await fetchOSPdf(numero, session), `${String(numero).replace(/[^\w.-]/g, '_')}.pdf`, numero);
+    showPdf(w, await pdfComMargem(await fetchOSPdf(numero, session)), `${String(numero).replace(/[^\w.-]/g, '_')}.pdf`, numero);
   } catch (e) { if (w && !w.closed) w.close(); throw e; }
 }
 
