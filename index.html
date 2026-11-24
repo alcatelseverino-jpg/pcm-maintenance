@@ -365,6 +365,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
           </table>
           <div class="note">Horas = soma de (hora fim − hora início) dos registros de manutenção no período; horas preventivas/corretivas seguem o tipo do registro. OS concluídas = pela data de conclusão. “Em aberto agora” não depende do período.</div>
           <div class="note" id="pNote"></div>
+          <div id="pDist" style="overflow-x:auto;padding-bottom:8px"></div>
         </div>
         <div id="tabMM" class="pb" hidden>
           <div class="sub">
@@ -1921,6 +1922,7 @@ function renderProd() {
   $('#pNote').textContent = regs.length
     ? `Produtividade = horas registradas ÷ horas disponíveis (seg–sex 8 h, sábado 4 h, domingo 0). Dias de trabalho = dias em que a equipe registrou (dia sem registro de ninguém = feriado); feriados e ausências cadastrados em “Equipe e calendário” são descontados. CLT: todos esses dias; se faltou, a produtividade cai. MEI: a partir do 1º registro dele no período. Pode passar de 100%. ${semOs} de ${regs.length} registros (${Math.round(100 * semOs / regs.length)}%) não têm OS vinculada: contam nas horas, mas não em “OS conc.”. Por isso um técnico pode ter muitas horas e poucas OS concluídas.`
     : '';
+  $('#pDist').innerHTML = relDistribuicao(p.de, p.ate);
 }
 
 function renderMM() {
