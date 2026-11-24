@@ -230,6 +230,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
     <span class="chip" id="userChip"></span>
     <button class="btn" id="btnGestao" type="button" title="OS fora do prazo, aderência preventiva, maiores paradas e qualidade dos registros">📋 Gestão</button>
     <button class="btn" id="btnEquipe" type="button" title="Regime dos técnicos, feriados e ausências">👥 Equipe e calendário</button>
+    <button class="btn" id="btnFolhasPapel" type="button" title="Gerar e controlar as folhas de registro numeradas">📄 Folhas</button>
     <button class="btn" id="btnFolha" type="button" title="Fotografar a folha de registro e ler as linhas">📷 Ler folha por foto</button>
     <button class="btn" id="btnNC" type="button" title="Itens do checklist marcados como Não OK">⚠ Não conformidades<span class="ncn" id="ncN" hidden></span></button>
     <button class="btn" id="btnReload" type="button">↻ Atualizar</button>
@@ -588,7 +589,7 @@ async function loadAll() {
       fetchAll('grupo_equipamento', 'id,nome,descricao,codigo_base,ativo', 'id'),
       fetchAll('ordem_servico', 'id,numero,equipamento_id,plano_id,tecnico_id,tipo,status,prioridade,titulo,descricao,sla_horas,data_abertura,data_limite,data_conclusao,tempo_gasto_minutos,servico_executado,confirmada_em', ['data_abertura', 'id']),
       fetchAll('vw_proxima_manutencao_equipamento', '*', 'equipamento_id'),
-      fetchAll('registro_manutencao', 'id,equipamento_id,tecnico_id,ordem_servico_id,tipo_manutencao,data_servico,hora_inicio,hora_fim,descricao', 'id'),
+      fetchAll('registro_manutencao', 'id,equipamento_id,tecnico_id,ordem_servico_id,tipo_manutencao,data_servico,hora_inicio,hora_fim,descricao,folha_papel_id,linha_folha', 'id'),
       fetchAll('vw_registro_manutencao_detalhado', 'data,inicio,fim,tempo,tecnico,equipamento_codigo,equipamento,grupo,ordem_servico,tipo,descricao', ['data', 'inicio', 'equipamento_codigo', 'tecnico']),
       fetchAll('plano_manutencao', 'id,codigo,nome,grupo_id,periodicidade_dias,ativo', 'id'),
       // as funções editor_* exigem perfil admin no banco; técnicos usam um modo leitura montado a partir das tabelas
@@ -1008,6 +1009,7 @@ function openNC() {
 }
 $('#btnNC').addEventListener('click', openNC);
 $('#btnFolha').addEventListener('click', openFolha);
+$('#btnFolhasPapel').addEventListener('click', openFolhasPapel);
 $('#dlgBody').addEventListener('click', async e => {
   const ok = e.target.closest('[data-ncok]'), no = e.target.closest('[data-ncno]');
   if (!ok && !no) return;
@@ -1555,6 +1557,99 @@ const simText = r => {
   return `Próxima manutenção: ${fmtDate(r.proxima_manutencao)} · status ${L.cal[r.status_antes] || r.status_antes} → ${L.cal[r.status_depois] || r.status_depois}`;
 };
 
+/* ---- folhas de registro numeradas (RG de Manutenção) ---- */
+const fnum = n => String(n).padStart(5, '0');
+const FOLHA_ST = {emitida: 'Emitida', entregue: 'Entregue ao técnico', lida: 'Lida e gravada', arquivada: 'Arquivada', cancelada: 'Cancelada'};
+const mesAnoTxt = d => d ? `${d.slice(5, 7)} / ${d.slice(0, 4)}` : '';
+function htmlFolhas(folhas) {
+  const pag = f => {
+    const n = f.linhas || 30, tec = S.tecById.get(f.tecnico_id)?.nome || '';
+    const linhas = Array.from({length: n}, (_, i) => `<tr><td class="ln">${i + 1}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`).join('');
+    return `<section class="f"><div class="top"><h1>RG de Manutenção</h1><div class="num">FOLHA Nº <b>${fnum(f.numero)}</b></div></div>
+<div class="hd"><div><u>Manutenção Granalha</u></div><div>MÊS / ANO: <b>${esc(mesAnoTxt(f.mes_ano))}</b></div><div>TÉCNICO: <b>${esc(tec)}</b></div></div>
+<table><colgroup><col style="width:6mm"><col style="width:15mm"><col style="width:13mm"><col style="width:13mm"><col style="width:17mm"><col><col style="width:14mm"></colgroup>
+<thead><tr><th>Lin.</th><th>Dia<br>DATA</th><th>Hora<br>INÍCIO</th><th>Hora<br>FIM</th><th>EQUIPO</th><th>SERVIÇO EXECUTADO / DESCRIÇÃO</th><th>Nº<br>O.S.</th></tr></thead><tbody>${linhas}</tbody></table>
+<div class="obs">OBSERVAÇÕES / MATERIAIS UTILIZADOS:</div>
+<div class="ass"><span>Assinatura do Técnico / Executante</span><span>Visto da Supervisão</span></div>
+<div class="rod">Folha nº ${fnum(f.numero)} · emitida em ${new Date(f.emitida_em || Date.now()).toLocaleDateString('pt-BR', {timeZone: TZ})} · GestorPCM</div></section>`;
+  };
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Folhas ${folhas.map(f => fnum(f.numero)).join('-')}</title>
+<style>@page{size:A4 portrait;margin:11mm}*{box-sizing:border-box}body{font:11px Arial,sans-serif;color:#000;margin:0}
+.bar{display:flex;justify-content:flex-end;padding:8px 12px;background:#0f766e}.bar button{border:0;border-radius:6px;padding:7px 14px;font-weight:700;cursor:pointer}
+.f{width:188mm;margin:0 auto;page-break-after:always}.f:last-child{page-break-after:auto}
+.top{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:3mm}h1{font-size:20px;margin:0}.num{font-size:15px}.num b{font-size:22px;letter-spacing:1px}
+.hd{display:flex;justify-content:space-between;gap:6mm;margin:3mm 0 3mm;font-size:12px}.hd b{font-size:12px}.hd div:first-child{font-weight:700;font-size:13px}
+table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #000;padding:0 1.5mm}th{background:#eee;font-size:9px;height:9mm}td{height:6.1mm}td.ln{font-size:8px;color:#666;text-align:center;padding:0}
+.obs{margin-top:4mm;border:1.4px solid #000;height:27mm;padding:1.5mm;font-weight:700;font-size:10px}
+.ass{display:flex;justify-content:space-around;margin-top:13mm;border-top:1px solid #000;padding-top:1.5mm;font-weight:700;font-size:10px}
+.rod{margin-top:3mm;font-size:8.5px;color:#444;text-align:right}
+@media print{.bar{display:none}}</style></head><body><div class="bar"><button onclick="window.print()">Imprimir</button></div>${folhas.map(pag).join('')}</body></html>`;
+}
+function escreveJanela(w, html) { w.document.open(); w.document.write(html); w.document.close(); }
+
+async function openFolhasPapel() {
+  const tecOpts = S.tecnicos.filter(t => t.ativo !== false).map(t => [t.id, t.nome]);
+  const hoje = todayIso();
+  const body = (S.admin ? `<div class="full"><b>Gerar folhas numeradas</b><div class="hint">Cada folha recebe um número único e sai com o mesmo layout da folha atual (30 linhas).</div></div>
+    ${fld('Técnico (opcional)', `<select id="fp_tec">${optList(tecOpts, '', '— em branco —')}</select>`)}
+    ${fld('Mês / ano', `<input type="month" id="fp_mes" value="${hoje.slice(0, 7)}">`)}
+    ${fld('Quantidade (1 a 20)', '<input type="number" id="fp_qtd" min="1" max="20" value="1">')}
+    <div class="full"><button type="button" class="btn pri" id="fp_ger">Gerar e imprimir</button></div>` : '<div class="full hint">Somente o administrador gera folhas. Você pode consultar as folhas emitidas.</div>') +
+    `<div class="full"><hr><b>Folhas emitidas</b> <input id="fp_q" placeholder="Buscar pelo nº da folha" inputmode="numeric" style="width:190px;margin-left:8px"></div><div class="full" id="fp_lista" style="overflow:auto"></div>`;
+  openModal({title: 'Folhas de registro', body, wide: true, closeLabel: 'Fechar', actions: []});
+  const lista = async () => {
+    const q = $('#fp_q').value.replace(/\D/g, '');
+    let qb = sb.from('folha_papel').select('*').order('numero', {ascending: false}).limit(60);
+    if (q) qb = qb.eq('numero', parseInt(q, 10));
+    const {data, error} = await qb;
+    if (error) { showErr(error); return; }
+    window.__folhas = data || [];
+    $('#fp_lista').innerHTML = (data || []).length ? `<table class="t"><thead><tr><th>Nº</th><th>Técnico</th><th>Mês</th><th>Situação</th><th>Onde está arquivada</th><th class="num">Registros</th><th></th></tr></thead><tbody>` +
+      data.map(f => `<tr style="cursor:default" data-fp="${f.id}"><td class="mono"><b>${fnum(f.numero)}</b></td><td>${esc(S.tecById.get(f.tecnico_id)?.nome || '—')}</td><td>${esc(mesAnoTxt(f.mes_ano) || '—')}</td>
+        <td><select data-fpst${S.admin ? '' : ' disabled'}>${optList(Object.entries(FOLHA_ST), f.status)}</select></td>
+        <td><input data-fploc value="${esc(f.local_arquivo || '')}" placeholder="pasta / caixa"${S.admin ? '' : ' disabled'} style="min-width:120px"></td>
+        <td class="num">${S.regs.filter(r => r.folha_papel_id === f.id).length}</td>
+        <td><button type="button" class="ib" data-fpimp="${f.id}" title="Reimprimir">🖨</button><button type="button" class="ib" data-fpfoto="${f.id}" title="Abrir foto da folha">📷</button></td></tr>`).join('') + '</tbody></table>'
+      : '<div class="empty">Nenhuma folha encontrada.</div>';
+  };
+  await lista();
+  let t = null; $('#fp_q').addEventListener('input', () => { clearTimeout(t); t = setTimeout(lista, 300); });
+  const g = $('#fp_ger');
+  if (g) g.addEventListener('click', async () => {
+    const qtd = Math.max(1, Math.min(20, parseInt($('#fp_qtd').value, 10) || 1));
+    if (!twoStep(g, 'Confirmar: gerar ' + qtd)) return;
+    const w = window.open('', '_blank');
+    try {
+      const mes = $('#fp_mes').value ? $('#fp_mes').value + '-01' : null, tec = $('#fp_tec').value || null;
+      const {data, error} = await sb.from('folha_papel').insert(Array.from({length: qtd}, () => ({tecnico_id: tec, mes_ano: mes}))).select('*').order('numero');
+      if (error) throw error;
+      if (w) escreveJanela(w, htmlFolhas(data)); else toast('Folhas geradas, mas o navegador bloqueou a nova aba. Reimprima pela lista.', 'bad');
+      toast(`${data.length} folha(s) gerada(s): ${fnum(data[0].numero)}${data.length > 1 ? ' a ' + fnum(data[data.length - 1].numero) : ''}.`, 'good');
+      await lista();
+    } catch (e) { if (w) w.close(); showErr(e); }
+  });
+  $('#fp_lista').addEventListener('change', async e => {
+    const tr = e.target.closest('tr[data-fp]'); if (!tr) return;
+    const upd = e.target.matches('[data-fpst]') ? {status: e.target.value, lida_em: e.target.value === 'lida' ? new Date().toISOString() : null} : e.target.matches('[data-fploc]') ? {local_arquivo: nz(e.target.value)} : null;
+    if (!upd) return;
+    const {data, error} = await sb.from('folha_papel').update(upd).eq('id', tr.dataset.fp).select('id');
+    if (error || !data?.length) { showErr(error || new Error('Sem permissão para alterar.')); return; }
+    toast('Folha atualizada.', 'good');
+  });
+  $('#fp_lista').addEventListener('click', async e => {
+    const im = e.target.closest('[data-fpimp]'), ft = e.target.closest('[data-fpfoto]');
+    if (im) { const f = (window.__folhas || []).find(x => x.id === im.dataset.fpimp); const w = window.open('', '_blank'); if (w && f) escreveJanela(w, htmlFolhas([f])); }
+    if (ft) {
+      const w = window.open('', '_blank');
+      const {data, error} = await sb.from('folha_registro').select('caminho').eq('folha_papel_id', ft.dataset.fpfoto).order('criado_em', {ascending: false}).limit(1);
+      if (error || !data?.length) { if (w) w.close(); toast(error ? errMsg(error) : 'Esta folha ainda não tem foto enviada.', error ? 'bad' : ''); return; }
+      const {data: u, error: e2} = await sb.storage.from('folhas-registro').createSignedUrl(data[0].caminho, 300);
+      if (e2) { if (w) w.close(); showErr(e2); return; }
+      if (w) w.location = u.signedUrl;
+    }
+  });
+}
+
 /* ---- ler folha de registro por foto ---- */
 const FOLHA_MAX = 1600;
 async function tratarImagem(file, rot, melhorar) {
@@ -1589,11 +1684,19 @@ function openFolha() {
     <div class="full"><label class="btn" for="fo_cam">📷 Tirar foto</label><input id="fo_cam" type="file" accept="image/*" capture="environment" hidden>
       <label class="btn" for="fo_arq">🖼 Escolher arquivo(s)</label><input id="fo_arq" type="file" accept="image/*" multiple hidden>
       <label style="margin-left:10px;font-weight:500"><input type="checkbox" id="fo_melhor" checked style="width:auto"> Melhorar contraste</label></div>
+    <div class="full"><label>Folha numerada (opcional)</label><select id="fo_fp"><option value="">— sem folha numerada —</option></select><div class="hint">Escolha o número impresso no topo da folha para ligar os registros a ela.</div></div>
     <div class="full" id="fo_prev"></div>
     <div class="full"><button type="button" class="btn pri" id="fo_ler" disabled>Ler folha</button> <button type="button" class="btn" id="fo_hist">🗂 Folhas já enviadas</button></div>
     <div class="full hint" id="fo_st"></div><div class="full" id="fo_lista"></div>`;
   openModal({title: 'Ler folha de registro por foto', body, wide: true, actions: []});
   const st = t => { $('#fo_st').textContent = t; };
+  let fps = [];
+  try {
+    sb.from('folha_papel').select('*').in('status', ['emitida', 'entregue']).order('numero', {ascending: false}).limit(80).then(({data}) => {
+      fps = data || [];
+      $('#fo_fp').innerHTML = '<option value="">— sem folha numerada —</option>' + fps.map(f => `<option value="${f.id}">Nº ${fnum(f.numero)} · ${esc(S.tecById.get(f.tecnico_id)?.nome || 'sem técnico')} · ${esc(mesAnoTxt(f.mes_ano) || '—')}</option>`).join('');
+    }, () => {});
+  } catch (_) {}
   const desenha = () => {
     $('#fo_prev').innerHTML = itens.map((it, i) => `<div class="fthumb"><img src="${it.url}" alt="Folha ${i + 1}"><div><button type="button" class="ib" data-forot="${i}" title="Girar 90°">↻</button><button type="button" class="ib" data-forem="${i}" title="Remover">✕</button><span class="muted">${Math.round(it.blob.size / 1024)} KB</span></div></div>`).join('');
     $('#fo_ler').disabled = !itens.length;
@@ -1624,7 +1727,7 @@ function openFolha() {
       const j = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(j.erro || `Falha ao ler a folha (HTTP ${resp.status}).`);
       if (!(j.registros || []).length) throw new Error('A IA não encontrou linhas de registro nesta folha.' + (j.observacoes_leitura ? ' ' + j.observacoes_leitura : ''));
-      revisaFolha(j, itens);
+      revisaFolha(j, itens, fps.find(f => f.id === $('#fo_fp').value) || null);
     } catch (e) { st(''); showErr(e); b.disabled = false; }
   });
   $('#fo_hist').addEventListener('click', async () => {
@@ -1642,7 +1745,7 @@ function openFolha() {
   });
 }
 
-function revisaFolha(j, itens) {
+function revisaFolha(j, itens, fp) {
   const hoje = todayIso();
   const tecOpts = S.tecnicos.filter(t => t.ativo !== false).map(t => [t.id, t.nome]);
   const eqOpts = [...S.equips].sort((a, b) => String(a.codigo || '').localeCompare(String(b.codigo || ''))).map(e => [e.id, `${e.codigo} — ${e.nome}`]);
@@ -1651,7 +1754,7 @@ function revisaFolha(j, itens) {
   const dv = (r, c) => r.duvidas.includes(c) ? ' dv' : '';
   const linhas = regs.map((r, i) => {
     const marcado = r.situacao === 'novo' || r.situacao === 'atualizar_os';
-    return `<tr class="fr" data-fr="${i}"><td><input type="checkbox" data-f="sel"${marcado ? ' checked' : ''}></td><td class="mono">${r.linha}</td>
+    return `<tr class="fr" data-fr="${i}"><td><input type="checkbox" data-f="sel"${marcado ? ' checked' : ''}></td><td><input type="number" data-f="lin" min="1" max="${fp?.linhas || 60}" value="${r.linha}" style="width:48px"></td>
       <td><input type="date" data-f="data" class="${dv(r, 'data')}" value="${esc(r.data || '')}" max="${hoje}"></td>
       <td><select data-f="tec" class="${dv(r, 'tecnico')}">${optList(tecOpts, r.tecnico_id, '—')}</select></td>
       <td><select data-f="eq" class="${dv(r, 'equipamento')}">${optList(eqOpts, r.equipamento_id, '—')}</select></td>
@@ -1664,14 +1767,14 @@ function revisaFolha(j, itens) {
   }).join('');
   const body = `<div class="full hint">Confira cada linha. Campos em vermelho são os que a IA não leu com certeza${j.observacoes_leitura ? '. Observação da leitura: ' + esc(j.observacoes_leitura) : ''}. Só as linhas marcadas serão gravadas.</div>
     <div class="full"><label style="display:inline">Técnico de todas as linhas: </label><select id="fr_tec" style="width:auto"><option value="">— manter —</option>${optList(tecOpts, '')}</select></div>
-    <div class="full" style="overflow:auto"><table class="t frt"><thead><tr><th></th><th>Lin.</th><th>Data</th><th>Técnico</th><th>Equipamento</th><th>Tipo</th><th>Início</th><th>Fim</th><th>Descrição</th><th>OS</th><th>Situação</th></tr></thead><tbody>${linhas}</tbody></table></div>`;
+    <div class="full" style="overflow:auto"><table class="t frt"><thead><tr><th></th><th title="Linha na folha de papel">Lin.</th><th>Data</th><th>Técnico</th><th>Equipamento</th><th>Tipo</th><th>Início</th><th>Fim</th><th>Descrição</th><th>OS</th><th>Situação</th></tr></thead><tbody>${linhas}</tbody></table></div>`;
   openModal({title: 'Conferir registros lidos da folha', body, wide: true, xl: true, closeLabel: 'Fechar', actions: [{label: 'Gravar linhas marcadas', cls: 'pri',
     confirm: () => {
       const n = $$('#dlgBody tr.fr').filter(tr => !tr.classList.contains('feito') && $('[data-f=sel]', tr).checked).length;
       if (!n) throw new Error('Marque pelo menos uma linha.');
       return `Gravar ${n} linha(s) e guardar a(s) foto(s) da folha?`;
     }, confirmLabel: 'Confirmar gravação', run: async () => {
-      const ler = tr => { const g = k => $(`[data-f=${k}]`, tr).value; return {i: +tr.dataset.fr, data: g('data'), tec: g('tec'), eq: g('eq'), tipo: g('tipo'), hi: g('hi'), hf: g('hf'), desc: g('desc').trim(), os: g('os').replace(/\D/g, '')}; };
+      const ler = tr => { const g = k => $(`[data-f=${k}]`, tr).value; return {i: +tr.dataset.fr, data: g('data'), tec: g('tec'), eq: g('eq'), tipo: g('tipo'), hi: g('hi'), hf: g('hf'), desc: g('desc').trim(), os: g('os').replace(/\D/g, ''), lin: parseInt(g('lin'), 10) || null}; };
       const sel = $$('#dlgBody tr.fr').filter(tr => !tr.classList.contains('feito') && $('[data-f=sel]', tr).checked);
       const prontos = [], erros = [];
       for (const tr of sel) {
@@ -1679,13 +1782,14 @@ function revisaFolha(j, itens) {
         if (!x.data) ex.push('data'); else if (x.data > hoje) ex.push('data no futuro');
         if (!x.tec) ex.push('técnico'); if (!x.eq) ex.push('equipamento'); if (!x.tipo) ex.push('tipo');
         if (!!x.hi !== !!x.hf) ex.push('preencha início e fim (ou deixe os dois vazios)'); else if (x.hi && x.hf <= x.hi) ex.push('fim deve ser depois do início');
+        if (fp && (!x.lin || x.lin > fp.linhas)) ex.push(`linha da folha entre 1 e ${fp.linhas}`);
         let os = null;
         if (x.os) { os = S.os.find(o => String(o.numero) === x.os); if (!os) ex.push(`OS ${x.os} não existe`); else if (x.eq && os.equipamento_id !== x.eq) ex.push(`a OS ${x.os} é de outro equipamento`); }
         if (ex.length) { erros.push(`Linha ${r.linha}: ${ex.join(', ')}`); $('[data-f=sel]', tr).closest('tr').style.outline = '2px solid var(--red)'; continue; }
         tr.style.outline = '';
         const upd = r.situacao === 'atualizar_os' && r.registro_existente_id;
         prontos.push({tr, linha: r.linha, upd, id: r.registro_existente_id, os_id: os?.id || null,
-          row: {equipamento_id: x.eq, tecnico_id: x.tec, tipo_manutencao: x.tipo, data_servico: x.data, hora_inicio: x.hi || null, hora_fim: x.hf || null, descricao: x.desc || null, ordem_servico_id: os?.id || null}, x});
+          row: {equipamento_id: x.eq, tecnico_id: x.tec, tipo_manutencao: x.tipo, data_servico: x.data, hora_inicio: x.hi || null, hora_fim: x.hf || null, descricao: x.desc || null, ordem_servico_id: os?.id || null, folha_papel_id: fp?.id || null, linha_folha: fp ? x.lin : null}, x});
       }
       if (erros.length) throw new Error('Corrija antes de gravar → ' + erros.join(' · '));
       if (!revisaFolha.enviado) {
@@ -1697,7 +1801,7 @@ function revisaFolha(j, itens) {
           const caminho = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${crypto.randomUUID()}.jpg`;
           const {error: e1} = await sb.storage.from('folhas-registro').upload(caminho, it.blob, {contentType: 'image/jpeg'});
           if (e1) throw e1;
-          const {data: f, error: e2} = await sb.from('folha_registro').insert({caminho, tecnico_id: tec, data_folha: dia, qtd_registros: novos.length}).select('id').single();
+          const {data: f, error: e2} = await sb.from('folha_registro').insert({caminho, tecnico_id: tec, data_folha: dia, qtd_registros: novos.length, folha_papel_id: fp?.id || null}).select('id').single();
           if (e2) throw e2;
           revisaFolha.ids.push(f.id);
         }
@@ -1719,9 +1823,11 @@ function revisaFolha(j, itens) {
       }
       if (ok) { await loadAll(); }
       if (falhas.length) { toast(`${ok} gravada(s), ${falhas.length} com problema.`, 'bad'); throw new Error(`${ok} gravada(s). Não gravou → ` + falhas.join(' · ')); }
+      if (fp) { try { await sb.from('folha_papel').update({status: 'lida', lida_em: new Date().toISOString()}).eq('id', fp.id); } catch (_) {} }
       revisaFolha.enviado = false; closeModal(); toast(`${ok} linha(s) gravada(s) e folha guardada.`, 'good');
     }}]});
   revisaFolha.enviado = false;
+  if (fp?.tecnico_id) $$('#dlgBody [data-f=tec]').forEach(s => { if (!s.value) { s.value = fp.tecnico_id; s.classList.remove('dv'); } });
   $('#fr_tec').addEventListener('change', e => { if (e.target.value) $$('#dlgBody [data-f=tec]').forEach(s => { if (!s.disabled) { s.value = e.target.value; s.classList.remove('dv'); } }); });
 }
 
