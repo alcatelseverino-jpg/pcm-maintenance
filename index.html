@@ -859,6 +859,58 @@ function refreshDialogs() {
   else if (t === 'Gestão da manutenção') renderGestao();
 }
 
+/* resumo de horas por categoria e produtividade global (mesma regra do painel) para um período [de, ate] */
+function prodResumo(de, ate) {
+  const p = S.f.prod;
+  const okEq = id => !p.grupo || S.eqById.get(id)?.grupo_id === p.grupo;
+  const okTec = id => !p.tec || id === p.tec;
+  const regs = S.regs.filter(r => r.data_servico && r.data_servico >= de && r.data_servico <= ate && okEq(r.equipamento_id) && okTec(r.tecnico_id));
+  const mins = r => minutesBetween(r.hora_inicio, r.hora_fim);
+  const cat = {prev: {n: 0, min: 0}, corr: {n: 0, min: 0}, sem: {n: 0, min: 0}};
+  regs.forEach(r => { const c = !r.ordem_servico_id ? cat.sem : r.tipo_manutencao === 'corretiva' ? cat.corr : cat.prev; c.n++; c.min += mins(r); });
+  const tecs = new Set(regs.map(r => r.tecnico_id));
+  S.os.forEach(o => { if (o.status === 'concluida' && inRange(o.data_conclusao, de, ate) && okEq(o.equipamento_id) && okTec(o.tecnico_id)) tecs.add(o.tecnico_id); });
+  const hoje = iso(new Date());
+  const isMei = id => S.tecById.get(id)?.regime === 'mei';
+  const minDia = d => { const w = new Date(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)).getDay(); return w === 0 ? 0 : w === 6 ? 240 : 480; };
+  const diasClt = new Set(), diasMei = new Map();
+  S.regs.forEach(r => {
+    const d = r.data_servico; if (!d || d < de || d > ate || d > hoje) return;
+    if (!isMei(r.tecnico_id)) diasClt.add(d); else { if (!diasMei.has(r.tecnico_id)) diasMei.set(r.tecnico_id, new Set()); diasMei.get(r.tecnico_id).add(d); }
+  });
+  const feriados = new Set((S.feriados || []).map(f => f.data));
+  const emAus = (id, d) => (S.ausencias || []).some(a => a.tecnico_id === id && d >= a.data_inicio && d <= a.data_fim);
+  let disp = 0;
+  tecs.forEach(id => {
+    let dias, ini = '';
+    const fim = ate < hoje ? ate : hoje;
+    if (isMei(id)) { const meus = diasMei.get(id); if (!meus || !meus.size) return; ini = [...meus].sort()[0]; dias = new Set([...diasClt, ...meus]); } else dias = diasClt;
+    dias.forEach(d => { if (d >= ini && d <= fim && !feriados.has(d) && !emAus(id, d)) disp += minDia(d); });
+  });
+  const total = cat.prev.min + cat.corr.min + cat.sem.min;
+  return {cat, total, n: regs.length, disp, pc: disp ? 100 * total / disp : null};
+}
+function relDistribuicao(de, ate) {
+  const hoje = iso(new Date());
+  const ini = de || (S.regs.map(r => r.data_servico).filter(Boolean).sort()[0] || hoje), fim = ate || hoje;
+  const meses = [];
+  for (let y = +ini.slice(0, 4), m = +ini.slice(5, 7); y < +fim.slice(0, 4) || (y === +fim.slice(0, 4) && m <= +fim.slice(5, 7)); m++) { if (m > 12) { m = 1; y++; } meses.push([y, m]); if (meses.length > 36) break; }
+  const f1 = x => (x / 60).toLocaleString('pt-BR', {minimumFractionDigits: 1, maximumFractionDigits: 1});
+  const pct = (x, t) => t ? (100 * x / t).toLocaleString('pt-BR', {minimumFractionDigits: 1, maximumFractionDigits: 1}) + '%' : '—';
+  const lin = (nome, R, cls) => `<tr${cls ? ` class="${cls}"` : ''}><td>${nome}</td>` +
+    ['prev', 'corr', 'sem'].map(k => `<td class="num">${f1(R.cat[k].min)} h<br><small>${pct(R.cat[k].min, R.total)} · ${R.cat[k].n} apont.</small></td>`).join('') +
+    `<td class="num"><b>${f1(R.total)} h</b><br><small>${R.n} apont.</small></td><td class="num">${f1(R.disp)} h</td><td class="num"><b>${R.pc == null ? '—' : R.pc.toLocaleString('pt-BR', {maximumFractionDigits: 0}) + '%'}</b></td></tr>`;
+  const rows = meses.map(([y, m]) => {
+    const a = `${y}-${String(m).padStart(2, '0')}-01`, b = `${y}-${String(m).padStart(2, '0')}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
+    const R = prodResumo(a > ini ? a : ini, b < fim ? b : fim);
+    return R.n || R.disp ? lin(`${String(m).padStart(2, '0')}/${y}`, R) : '';
+  }).join('');
+  const T = prodResumo(ini, fim);
+  return `<h2 style="font-size:14px;margin:16px 0 4px">Distribuição das horas por mês</h2>
+    <div class="n" style="margin:0 0 4px">Percentual sobre as horas registradas de cada mês. <b>Preventiva</b> e <b>Corretiva</b> = registros ligados a uma OS (pelo tipo da manutenção); <b>Sem OS</b> = registros sem número de OS (trabalho não programado). As três categorias somam o total.</div>
+    <table><thead><tr><th>Mês</th><th>Preventiva</th><th>Corretiva</th><th>Sem OS</th><th>Total</th><th>H. disp.</th><th>Produtividade</th></tr></thead><tbody>${rows}${lin('<b>TOTAL GRANALHA</b>', T, 'tot')}</tbody></table>`;
+}
+
 /* ---------- relatório de produtividade para imprimir ---------- */
 $('#btnPRel').addEventListener('click', () => {
   const w = window.open('', '_blank');
@@ -879,11 +931,11 @@ $('#btnPRel').addEventListener('click', () => {
 .ks{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px}.k{border:1px solid #bbb;border-radius:6px;padding:6px 10px;min-width:92px}.k b{display:block;font-size:17px}.k span{font-size:10px;color:#555}
 table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border:1px solid #999;padding:4px 6px;text-align:left}th{background:#e5e7eb;font-size:11px}
 .num{text-align:right}.tot td{font-weight:700;background:#f1f5f9;border-top:2px solid #111}
-.n{font-size:10.5px;color:#333;margin-top:10px;line-height:1.45}.n b{color:#000}
+.n{font-size:10.5px;color:#333;margin-top:10px;line-height:1.45}small{font-size:9.5px;color:#555}.n b{color:#000}
 @media print{.bar{display:none}.pg{padding:0}}</style></head><body>
 <div class="bar"><button onclick="window.print()">Imprimir / Salvar em PDF</button></div>
 <div class="pg"><h1>Relatório de produtividade</h1><p class="sub">GestorPCM · TECJATO · gerado em ${new Date().toLocaleString('pt-BR', {timeZone: TZ})}</p>
-<div class="fl">${filtros}</div><div class="ks">${kp}</div>${tbl.outerHTML}
+<div class="fl">${filtros}</div><div class="ks">${kp}</div>${tbl.outerHTML}${relDistribuicao(de, ate)}
 <div class="n"><b>Como é calculado.</b> Produtividade = horas registradas ÷ horas disponíveis. Horas disponíveis: segunda a sexta 8 h e sábado 4 h (44 h semanais), só em dias de trabalho da equipe (dia sem registro de ninguém é tratado como feriado), descontando feriados e ausências cadastrados. MEI conta a partir do 1º registro dele no período. Pode passar de 100%. “OS conc.” = OS concluídas no período; “Regist.” = registros de manutenção (com ou sem OS).</div>
 ${fer.length ? `<div class="n"><b>Feriados no período:</b> ${fer.join('; ')}</div>` : ''}${aus.length ? `<div class="n"><b>Ausências no período:</b> ${aus.join('; ')}</div>` : ''}
 <div class="n">${esc($('#pNote').textContent.replace(/^.*?Pode passar de 100%\.\s*/, ''))}</div></div></body></html>`;
