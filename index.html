@@ -1562,9 +1562,9 @@ const fnum = n => String(n).padStart(5, '0');
 const FOLHA_ST = {emitida: 'Emitida', entregue: 'Entregue ao técnico', lida: 'Lida e gravada', arquivada: 'Arquivada', cancelada: 'Cancelada'};
 const mesAnoTxt = d => d ? `${d.slice(5, 7)} / ${d.slice(0, 4)}` : '';
 const FOLHA_LINHAS = 24;   // linhas por folha nova
-function legendaGrupos() {   // códigos dos grupos (em uso no cadastro) com o nome em português
-  return S.grupos.filter(g => g.ativo && g.codigo_base && S.equips.some(e => e.grupo_id === g.id && e.status !== 'desativado'))
-    .sort((a, b) => a.codigo_base.localeCompare(b.codigo_base)).map(g => `<span><b>${esc(g.codigo_base)}</b> ${esc(g.nome)}</span>`).join('');
+function legendaGrupos() {   // códigos de equipamento "Geral" (serviços gerais) ativos, com o nome em português
+  return S.equips.filter(e => e.geral && e.codigo && e.status !== 'desativado')
+    .sort((a, b) => a.codigo.localeCompare(b.codigo)).map(e => `<span><b>${esc(e.codigo)}</b> ${esc(String(e.nome || '').replace(/^Geral\s+/i, ''))}</span>`).join('');
 }
 function htmlFolhas(folhas) {
   const leg = legendaGrupos();
@@ -1577,7 +1577,7 @@ function htmlFolhas(folhas) {
 <table><colgroup><col style="width:6.5mm"><col style="width:16mm"><col style="width:18mm"><col style="width:18mm"><col style="width:21mm"><col><col style="width:16mm"></colgroup>
 <thead><tr><th>Lin.</th><th>Dia<br>DATA</th><th>Hora<br>INÍCIO</th><th>Hora<br>FIM</th><th>EQUIPO</th><th>SERVIÇO EXECUTADO / DESCRIÇÃO</th><th>Nº<br>O.S.</th></tr></thead><tbody>${linhas}</tbody></table>
 <div class="obs"><div class="ot">OBSERVAÇÕES / MATERIAIS UTILIZADOS:</div><div class="ob"></div>
-<div class="lg"><div class="lt">LEGENDA — CÓDIGO DOS GRUPOS</div><div class="lc">${leg}</div></div></div>
+<div class="lg"><div class="lt">LEGENDA — CÓDIGOS DE EQUIPAMENTO (EQUIPO) PARA SERVIÇOS GERAIS</div><div class="lc">${leg}</div></div></div>
 <div class="ass"><span>Assinatura do Técnico / Executante</span><span>Visto da Supervisão</span></div>
 <div class="rod">Folha nº ${fnum(f.numero)} · emitida em ${new Date(f.emitida_em || Date.now()).toLocaleDateString('pt-BR', {timeZone: TZ})} · GestorPCM</div></section>`;
   };
@@ -1587,7 +1587,7 @@ function htmlFolhas(folhas) {
 .f{width:192mm;margin:0 auto;page-break-after:always}.f:last-child{page-break-after:auto}
 .top{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:2mm}h1{font-size:20px;margin:0}.num{font-size:15px}.num b{font-size:22px;letter-spacing:1px}
 .hd{display:flex;justify-content:space-between;gap:6mm;margin:2.5mm 0;font-size:12px}.hd b{font-size:12px}.hd div:first-child{font-weight:700;font-size:13px}
-table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #000;padding:0 1.5mm}th{background:#eee;font-size:9px;height:9mm}th:first-child{font-size:7px;padding:0}td{height:7.6mm}td.ln{font-size:8px;color:#666;text-align:center;padding:0}
+table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #000;padding:0 1.5mm}th{background:#eee;font-size:9px;height:9mm}th:first-child{font-size:7px;padding:0}td{height:7.2mm}td.ln{font-size:8px;color:#666;text-align:center;padding:0}
 td.hr{position:relative;padding:0}td.hr i{position:absolute;left:0;right:0;top:50%;transform:translateY(-52%);text-align:center;font:700 20px Arial,sans-serif;font-style:normal}
 .obs{margin-top:3mm;border:1.4px solid #000;padding:1.5mm 2mm}.ot{font-weight:700;font-size:10px}.ob{height:8mm}
 .lg{border-top:1px solid #000;padding-top:1mm}.lt{font-weight:700;font-size:8px;margin-bottom:.8mm}.lc{column-count:5;column-gap:3mm;font-size:7.6px;line-height:1.28}.lc span{display:block;break-inside:avoid;white-space:nowrap;overflow:hidden}
