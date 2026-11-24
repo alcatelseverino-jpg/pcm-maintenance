@@ -1566,14 +1566,32 @@ function legendaGrupos() {   // códigos dos grupos ATIVOS com o nome em portugu
   return S.grupos.filter(g => g.ativo && g.codigo_base).sort((a, b) => a.codigo_base.localeCompare(b.codigo_base))
     .map(g => `<span><b>${esc(g.codigo_base)}</b> ${esc(g.nome)}</span>`).join('');
 }
+// registros lançados da folha, cada um na sua linha (os sem linha ocupam as linhas livres, em ordem de data/hora)
+function regsDaFolha(f) {
+  const rs = S.regs.filter(r => r.folha_papel_id === f.id), pos = new Map(), sem = [];
+  rs.forEach(r => (r.linha_folha && !pos.has(r.linha_folha)) ? pos.set(r.linha_folha, r) : sem.push(r));
+  sem.sort((a, b) => ((a.data_servico || '') + (a.hora_inicio || '')).localeCompare((b.data_servico || '') + (b.hora_inicio || '')));
+  const n = f.linhas || FOLHA_LINHAS;
+  for (let i = 1; i <= n && sem.length; i++) if (!pos.has(i)) pos.set(i, sem.shift());
+  return {pos, total: rs.length, fora: sem.length};
+}
 function htmlFolhas(folhas) {
   const leg = legendaGrupos();
   const pag = f => {
-    const n = f.linhas || FOLHA_LINHAS, tec = S.tecById.get(f.tecnico_id)?.nome || '';
+    const n = f.linhas || FOLHA_LINHAS, R = f.preenchida ? regsDaFolha(f) : null;
     const hr = '<td class="hr"><i>:</i></td>';
-    const linhas = Array.from({length: n}, (_, i) => `<tr><td class="ln">${i + 1}</td><td></td>${hr}${hr}<td></td><td></td><td></td></tr>`).join('');
-    return `<section class="f"><div class="top"><h1>RG DE MANUTENÇÃO</h1><div class="num">FOLHA Nº <b>${fnum(f.numero)}</b></div></div>
-<div class="hd"><div class="tc">TÉCNICO: <b>${esc(tec)}</b></div><div class="ma">MÊS / ANO: <b>${esc(mesAnoTxt(f.mes_ano))}</b></div><div class="mg">MANUTENÇÃO GRANALHA</div></div>
+    const hh = t => { const m = /^(\d{2}):(\d{2})/.exec(t || ''); return m ? `<td class="hr"><div class="hh"><b>${m[1]}</b><i>:</i><b>${m[2]}</b></div></td>` : hr; };
+    const dd = d => d ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : '';
+    const mes = f.mes_ano || (R && [...R.pos.values()].map(r => r.data_servico).filter(Boolean).sort()[0]?.slice(0, 7) + '-01') || null;
+    const tec = S.tecById.get(f.tecnico_id)?.nome || (R && S.tecById.get([...R.pos.values()][0]?.tecnico_id)?.nome) || '';
+    const linhas = Array.from({length: n}, (_, i) => {
+      const r = R && R.pos.get(i + 1);
+      if (!r) return `<tr><td class="ln">${i + 1}</td><td></td>${hr}${hr}<td></td><td></td><td></td></tr>`;
+      const eq = S.eqById.get(r.equipamento_id), os = r.ordem_servico_id ? S.os.find(o => o.id === r.ordem_servico_id) : null;
+      return `<tr class="pr"><td class="ln">${i + 1}</td><td class="c">${dd(r.data_servico)}</td>${hh(r.hora_inicio)}${hh(r.hora_fim)}<td class="c">${esc(S.grpById.get(eq?.grupo_id)?.codigo_base || eq?.codigo || '')}</td><td class="d">${esc(r.descricao || '')}</td><td class="c">${esc(os?.numero || '')}</td></tr>`;
+    }).join('');
+    return `<section class="f"><div class="top"><h1>RG DE MANUTENÇÃO</h1><div class="num">${R ? `<small>REIMPRESSÃO · ${R.total} registro(s)${R.fora ? ` · ${R.fora} não coube(ram)` : ''}</small> ` : ''}FOLHA Nº <b>${fnum(f.numero)}</b></div></div>
+<div class="hd"><div class="tc">TÉCNICO: <b>${esc(tec)}</b></div><div class="ma">MÊS / ANO: <b>${esc(mesAnoTxt(mes))}</b></div><div class="mg">MANUTENÇÃO GRANALHA</div></div>
 <div class="tw"><table><colgroup><col style="width:8mm"><col style="width:18mm"><col style="width:19mm"><col style="width:19mm"><col style="width:20mm"><col><col style="width:17mm"></colgroup>
 <thead><tr><th>LIN.</th><th>DIA<br>DATA</th><th>HORA<br>INÍCIO</th><th>HORA<br>FIM</th><th>CÓDIGO<br>DO GRUPO</th><th>SERVIÇO EXECUTADO / DESCRIÇÃO</th><th>Nº O.S.</th></tr></thead><tbody>${linhas}</tbody></table></div>
 <div class="obs"><div class="ot">CÓDIGOS DE GRUPOS:</div><div class="lc">${leg}</div></div></section>`;
@@ -1586,6 +1604,7 @@ function htmlFolhas(folhas) {
 .hd{display:flex;align-items:flex-end;gap:5mm;padding:2mm 1mm;margin-bottom:2mm;border-bottom:1px solid #000;font-size:11px;font-weight:700}.hd b{font-size:12px}.tc{flex:1;border-bottom:1px solid #000;padding-bottom:.5mm}.ma{white-space:nowrap}.mg{white-space:nowrap;font-size:11.5px}
 table{width:100%;height:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #000;padding:0 1.5mm}th{background:#e8e8e8;font-size:8.5px;height:10mm}td{height:7.2mm}td.ln{font-size:9px;text-align:center;padding:0}
 td.hr{position:relative;padding:0}td.hr i{position:absolute;left:0;right:0;top:50%;transform:translateY(-52%);text-align:center;font:700 20px Arial,sans-serif;font-style:normal}
+.num small{font-size:8px;font-weight:400;color:#444;margin-right:3mm}td.pr{font-size:9px}td.c{text-align:center;font-weight:700}td.d{font-size:8.5px;line-height:1.1;overflow:hidden;padding:0 1mm}.hh{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:1.2mm}.hh b{font-size:13px}.hh i{position:static;transform:none;font:700 13px Arial,sans-serif;font-style:normal;line-height:1}
 .obs{margin-top:2mm;border:1px solid #000}.ot{font-weight:700;font-size:11px;padding:1.2mm 1.5mm;border-bottom:1px solid #000}
 .lc{column-count:5;column-gap:3mm;font-size:8px;line-height:1.35;padding:1.2mm 1.5mm 1.5mm}.lc span{display:block;break-inside:avoid;white-space:nowrap;overflow:hidden}
 @media print{.bar{display:none}}</style></head><body><div class="bar"><button onclick="window.print()">Imprimir</button></div>${folhas.map(pag).join('')}</body></html>`;
@@ -1614,7 +1633,7 @@ async function openFolhasPapel() {
         <td><select data-fpst${S.admin ? '' : ' disabled'}>${optList(Object.entries(FOLHA_ST), f.status)}</select></td>
         <td><input data-fploc value="${esc(f.local_arquivo || '')}" placeholder="pasta / caixa"${S.admin ? '' : ' disabled'} style="min-width:120px"></td>
         <td class="num">${S.regs.filter(r => r.folha_papel_id === f.id).length}</td>
-        <td><button type="button" class="ib" data-fpimp="${f.id}" title="Reimprimir">🖨</button><button type="button" class="ib" data-fpfoto="${f.id}" title="Abrir foto da folha">📷</button></td></tr>`).join('') + '</tbody></table>'
+        <td><button type="button" class="ib" data-fpimp="${f.id}" title="Reimprimir em branco">🖨</button><button type="button" class="ib" data-fpreg="${f.id}" title="Reimprimir com os registros lançados"${S.regs.some(r => r.folha_papel_id === f.id) ? '' : ' disabled'}>🖨✍</button><button type="button" class="ib" data-fpfoto="${f.id}" title="Abrir foto da folha">📷</button></td></tr>`).join('') + '</tbody></table>'
       : '<div class="empty">Nenhuma folha encontrada.</div>';
   };
   await lista();
@@ -1642,7 +1661,8 @@ async function openFolhasPapel() {
     toast('Folha atualizada.', 'good');
   });
   $('#fp_lista').addEventListener('click', async e => {
-    const im = e.target.closest('[data-fpimp]'), ft = e.target.closest('[data-fpfoto]');
+    const im = e.target.closest('[data-fpimp]'), ft = e.target.closest('[data-fpfoto]'), rg = e.target.closest('[data-fpreg]');
+    if (rg) { const f = (window.__folhas || []).find(x => x.id === rg.dataset.fpreg); const w = window.open('', '_blank'); if (w && f) escreveJanela(w, htmlFolhas([{...f, preenchida: true}])); }
     if (im) { const f = (window.__folhas || []).find(x => x.id === im.dataset.fpimp); const w = window.open('', '_blank'); if (w && f) escreveJanela(w, htmlFolhas([f])); }
     if (ft) {
       const w = window.open('', '_blank');
