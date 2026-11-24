@@ -130,6 +130,9 @@ td.empty{text-align:center;color:var(--muted);padding:22px;cursor:default}
 /* ---------- modal ---------- */
 dialog{border:0;border-radius:14px;padding:0;width:min(560px,94vw);box-shadow:0 20px 60px rgba(15,23,42,.35);color:var(--ink)}
 dialog.wide{width:min(760px,95vw)}
+dialog.xl{width:min(1320px,97vw)}
+.fthumb{display:inline-block;margin:0 10px 10px 0;vertical-align:top}.fthumb img{display:block;height:150px;border:1px solid var(--line,#ccc);border-radius:6px}
+.frt input,.frt select{padding:4px 5px;font-size:12px;min-width:0}.frt td{vertical-align:top}.frt .dv{border-color:var(--red)!important;background:rgba(220,38,38,.07)}.frt tr.feito{opacity:.45}.fsit{font-size:12px;min-width:150px}
 dialog::backdrop{background:rgba(15,23,42,.5)}
 .dh{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
 .dh h3{margin:0;flex:1;font-size:16px}
@@ -227,6 +230,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
     <span class="chip" id="userChip"></span>
     <button class="btn" id="btnGestao" type="button" title="OS fora do prazo, aderência preventiva, maiores paradas e qualidade dos registros">📋 Gestão</button>
     <button class="btn" id="btnEquipe" type="button" title="Regime dos técnicos, feriados e ausências">👥 Equipe e calendário</button>
+    <button class="btn" id="btnFolha" type="button" title="Fotografar a folha de registro e ler as linhas">📷 Ler folha por foto</button>
     <button class="btn" id="btnNC" type="button" title="Itens do checklist marcados como Não OK">⚠ Não conformidades<span class="ncn" id="ncN" hidden></span></button>
     <button class="btn" id="btnReload" type="button">↻ Atualizar</button>
     <button class="btn" id="btnOut" type="button">Sair</button>
@@ -470,11 +474,11 @@ function showErr(e) {
 function setBusy(b) { $('#busy').hidden = !b; }
 
 /* ---------- modal ---------- */
-function openModal({title, body, actions = [], wide = false, closeLabel = 'Cancelar'}) {
+function openModal({title, body, actions = [], wide = false, xl = false, closeLabel = 'Cancelar'}) {
   const dlg = $('#dlg');
   $('#dlgTitle').textContent = title;
   $('#dlgBody').innerHTML = body + '<div class="ask" id="dlgAsk" hidden></div><div class="err" id="dlgErr" hidden></div>';
-  dlg.classList.toggle('wide', wide);
+  dlg.classList.toggle('wide', wide); dlg.classList.toggle('xl', xl);
   const foot = $('#dlgFoot'); foot.innerHTML = '';
   const cancel = document.createElement('button');
   cancel.type = 'button'; cancel.className = 'btn'; cancel.textContent = closeLabel;
@@ -950,6 +954,7 @@ function openNC() {
   openModal({title: 'Não conformidades', body, actions: [], wide: true});
 }
 $('#btnNC').addEventListener('click', openNC);
+$('#btnFolha').addEventListener('click', openFolha);
 $('#dlgBody').addEventListener('click', async e => {
   const ok = e.target.closest('[data-ncok]'), no = e.target.closest('[data-ncno]');
   if (!ok && !no) return;
@@ -1480,6 +1485,176 @@ const simText = r => {
   if ('equipamentos_afetados' in r) return `Equipamentos afetados: ${r.equipamentos_afetados} · atrasados antes → depois: ${r.atrasados_antes} → ${r.atrasados_depois} · próxima manutenção mais cedo: ${fmtDate(r.proxima_mais_cedo)}`;
   return `Próxima manutenção: ${fmtDate(r.proxima_manutencao)} · status ${L.cal[r.status_antes] || r.status_antes} → ${L.cal[r.status_depois] || r.status_depois}`;
 };
+
+/* ---- ler folha de registro por foto ---- */
+const FOLHA_MAX = 1600;
+async function tratarImagem(file, rot, melhorar) {
+  const bmp = await createImageBitmap(file, {imageOrientation: 'from-image'});
+  const k = Math.min(1, FOLHA_MAX / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k), r = ((rot % 4) + 4) % 4;
+  const c = document.createElement('canvas'); c.width = r % 2 ? h : w; c.height = r % 2 ? w : h;
+  const x = c.getContext('2d', {willReadFrequently: true});
+  x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  x.translate(c.width / 2, c.height / 2); x.rotate(r * Math.PI / 2); x.drawImage(bmp, -w / 2, -h / 2, w, h);
+  if (bmp.close) bmp.close();
+  if (melhorar) {   // estica os níveis: o papel vira branco e a letra escurece
+    const im = x.getImageData(0, 0, c.width, c.height), d = im.data, hist = new Uint32Array(256), tot = d.length / 4;
+    for (let i = 0; i < d.length; i += 4) hist[((d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000) | 0]++;
+    let a = 0, lo = 0, hi = 255;
+    for (let v = 0; v < 256; v++) { a += hist[v]; if (a >= tot * 0.02) { lo = v; break; } }
+    a = 0; for (let v = 255; v >= 0; v--) { a += hist[v]; if (a >= tot * 0.02) { hi = v; break; } }
+    if (hi - lo > 40) {
+      const g = 255 / (hi - lo);
+      for (let i = 0; i < d.length; i += 4) { d[i] = (d[i] - lo) * g; d[i + 1] = (d[i + 1] - lo) * g; d[i + 2] = (d[i + 2] - lo) * g; }
+      x.putImageData(im, 0, 0);
+    }
+  }
+  return await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
+}
+const blobB64 = blob => new Promise((res, rej) => { const f = new FileReader(); f.onload = () => res(String(f.result).split(',')[1]); f.onerror = rej; f.readAsDataURL(blob); });
+const moda = arr => { const m = new Map(); arr.filter(Boolean).forEach(v => m.set(v, (m.get(v) || 0) + 1)); return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null; };
+
+function openFolha() {
+  const itens = [];   // {file, rot, blob, url}
+  const body = `<div class="full hint">Fotografe ou escolha a folha de registro (até 4 imagens). A foto é ajustada aqui (tamanho, rotação e contraste) antes de ser lida. Nada é gravado até você conferir as linhas.</div>
+    <div class="full"><label class="btn" for="fo_cam">📷 Tirar foto</label><input id="fo_cam" type="file" accept="image/*" capture="environment" hidden>
+      <label class="btn" for="fo_arq">🖼 Escolher arquivo(s)</label><input id="fo_arq" type="file" accept="image/*" multiple hidden>
+      <label style="margin-left:10px;font-weight:500"><input type="checkbox" id="fo_melhor" checked style="width:auto"> Melhorar contraste</label></div>
+    <div class="full" id="fo_prev"></div>
+    <div class="full"><button type="button" class="btn pri" id="fo_ler" disabled>Ler folha</button> <button type="button" class="btn" id="fo_hist">🗂 Folhas já enviadas</button></div>
+    <div class="full hint" id="fo_st"></div><div class="full" id="fo_lista"></div>`;
+  openModal({title: 'Ler folha de registro por foto', body, wide: true, actions: []});
+  const st = t => { $('#fo_st').textContent = t; };
+  const desenha = () => {
+    $('#fo_prev').innerHTML = itens.map((it, i) => `<div class="fthumb"><img src="${it.url}" alt="Folha ${i + 1}"><div><button type="button" class="ib" data-forot="${i}" title="Girar 90°">↻</button><button type="button" class="ib" data-forem="${i}" title="Remover">✕</button><span class="muted">${Math.round(it.blob.size / 1024)} KB</span></div></div>`).join('');
+    $('#fo_ler').disabled = !itens.length;
+  };
+  const refaz = async it => { if (it.url) URL.revokeObjectURL(it.url); it.blob = await tratarImagem(it.file, it.rot, $('#fo_melhor').checked); it.url = URL.createObjectURL(it.blob); };
+  const add = async files => {
+    try {
+      for (const f of [...files]) { if (itens.length >= 4) { toast('No máximo 4 imagens por leitura.', 'bad'); break; } const it = {file: f, rot: 0}; await refaz(it); itens.push(it); }
+      desenha(); st('');
+    } catch (e) { showErr(new Error('Não consegui abrir a imagem: ' + (e.message || e))); }
+  };
+  $('#fo_cam').addEventListener('change', e => { add(e.target.files); e.target.value = ''; });
+  $('#fo_arq').addEventListener('change', e => { add(e.target.files); e.target.value = ''; });
+  $('#fo_melhor').addEventListener('change', async () => { for (const it of itens) await refaz(it); desenha(); });
+  $('#fo_prev').addEventListener('click', async e => {
+    const r = e.target.closest('[data-forot]'), m = e.target.closest('[data-forem]');
+    if (r) { const it = itens[+r.dataset.forot]; it.rot = (it.rot + 1) % 4; await refaz(it); desenha(); }
+    if (m) { const [it] = itens.splice(+m.dataset.forem, 1); URL.revokeObjectURL(it.url); desenha(); }
+  });
+  $('#fo_ler').addEventListener('click', async () => {
+    const b = $('#fo_ler'); b.disabled = true; $('#dlgErr').hidden = true; st('Lendo a folha com IA… pode levar até 1 minuto. Não feche esta janela.');
+    try {
+      const {data: {session}} = await sb.auth.getSession();
+      if (!session) throw new Error('Sessão expirada. Entre novamente.');
+      const imagens = []; for (const it of itens) imagens.push({imagem_base64: await blobB64(it.blob), mime: 'image/jpeg'});
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/ler-registros`, {method: 'POST',
+        headers: {Authorization: 'Bearer ' + session.access_token, apikey: SUPABASE_KEY, 'Content-Type': 'application/json'}, body: JSON.stringify({imagens})});
+      const j = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(j.erro || `Falha ao ler a folha (HTTP ${resp.status}).`);
+      if (!(j.registros || []).length) throw new Error('A IA não encontrou linhas de registro nesta folha.' + (j.observacoes_leitura ? ' ' + j.observacoes_leitura : ''));
+      revisaFolha(j, itens);
+    } catch (e) { st(''); showErr(e); b.disabled = false; }
+  });
+  $('#fo_hist').addEventListener('click', async () => {
+    const {data, error} = await sb.from('folha_registro').select('id,caminho,tecnico_id,data_folha,qtd_registros,criado_em').order('criado_em', {ascending: false}).limit(30);
+    if (error) { showErr(error); return; }
+    $('#fo_lista').innerHTML = (data || []).length ? `<table class="t"><thead><tr><th>Enviada em</th><th>Técnico</th><th>Data da folha</th><th>Registros</th><th></th></tr></thead><tbody>` +
+      data.map(f => `<tr style="cursor:default"><td>${esc(fmtDT(f.criado_em))}</td><td>${esc(S.tecById.get(f.tecnico_id)?.nome || '—')}</td><td>${f.data_folha ? fmtDia(f.data_folha) : '—'}</td><td class="num">${f.qtd_registros}</td><td><button type="button" class="btn" data-fopen="${esc(f.caminho)}">Abrir</button></td></tr>`).join('') + '</tbody></table>' : '<div class="empty">Nenhuma folha enviada ainda.</div>';
+  });
+  $('#fo_lista').addEventListener('click', async e => {
+    const b = e.target.closest('[data-fopen]'); if (!b) return;
+    const w = window.open('', '_blank');
+    const {data, error} = await sb.storage.from('folhas-registro').createSignedUrl(b.dataset.fopen, 300);
+    if (error) { if (w) w.close(); showErr(error); return; }
+    if (w) w.location = data.signedUrl; else toast('O navegador bloqueou a janela. Permita pop-ups para este site.', 'bad');
+  });
+}
+
+function revisaFolha(j, itens) {
+  const hoje = todayIso();
+  const tecOpts = S.tecnicos.filter(t => t.ativo !== false).map(t => [t.id, t.nome]);
+  const eqOpts = [...S.equips].sort((a, b) => String(a.codigo || '').localeCompare(String(b.codigo || ''))).map(e => [e.id, `${e.codigo} — ${e.nome}`]);
+  const SIT = {novo: 'Novo', ja_gravado: 'Já gravado', atualizar_os: 'Atualizar a OS do registro já gravado', os_diferente: 'Já gravado com outra OS'};
+  const regs = j.registros;
+  const dv = (r, c) => r.duvidas.includes(c) ? ' dv' : '';
+  const linhas = regs.map((r, i) => {
+    const marcado = r.situacao === 'novo' || r.situacao === 'atualizar_os';
+    return `<tr class="fr" data-fr="${i}"><td><input type="checkbox" data-f="sel"${marcado ? ' checked' : ''}></td><td class="mono">${r.linha}</td>
+      <td><input type="date" data-f="data" class="${dv(r, 'data')}" value="${esc(r.data || '')}" max="${hoje}"></td>
+      <td><select data-f="tec" class="${dv(r, 'tecnico')}">${optList(tecOpts, r.tecnico_id, '—')}</select></td>
+      <td><select data-f="eq" class="${dv(r, 'equipamento')}">${optList(eqOpts, r.equipamento_id, '—')}</select></td>
+      <td><select data-f="tipo" class="${dv(r, 'tipo')}">${optList([['preventiva', 'Preventiva'], ['corretiva', 'Corretiva']], r.tipo, '—')}</select></td>
+      <td><input type="time" data-f="hi" class="${dv(r, 'hora_inicio')}" value="${esc(r.hora_inicio || '')}"></td>
+      <td><input type="time" data-f="hf" class="${dv(r, 'hora_fim')}" value="${esc(r.hora_fim || '')}"></td>
+      <td><input type="text" data-f="desc" class="${dv(r, 'descricao')}" value="${esc(r.descricao || '')}"></td>
+      <td><input type="text" data-f="os" class="${dv(r, 'numero_os')}" value="${esc(r.numero_os || '')}" inputmode="numeric" style="width:70px"></td>
+      <td class="fsit"><b>${esc(SIT[r.situacao] || r.situacao)}</b>${r.situacao === 'os_diferente' ? ' (OS ' + esc(r.os_gravada) + ')' : ''}${r.duvida_texto ? `<div class="hint">${esc(r.duvida_texto)}</div>` : ''}</td></tr>`;
+  }).join('');
+  const body = `<div class="full hint">Confira cada linha. Campos em vermelho são os que a IA não leu com certeza${j.observacoes_leitura ? '. Observação da leitura: ' + esc(j.observacoes_leitura) : ''}. Só as linhas marcadas serão gravadas.</div>
+    <div class="full"><label style="display:inline">Técnico de todas as linhas: </label><select id="fr_tec" style="width:auto"><option value="">— manter —</option>${optList(tecOpts, '')}</select></div>
+    <div class="full" style="overflow:auto"><table class="t frt"><thead><tr><th></th><th>Lin.</th><th>Data</th><th>Técnico</th><th>Equipamento</th><th>Tipo</th><th>Início</th><th>Fim</th><th>Descrição</th><th>OS</th><th>Situação</th></tr></thead><tbody>${linhas}</tbody></table></div>`;
+  openModal({title: 'Conferir registros lidos da folha', body, wide: true, xl: true, closeLabel: 'Fechar', actions: [{label: 'Gravar linhas marcadas', cls: 'pri',
+    confirm: () => {
+      const n = $$('#dlgBody tr.fr').filter(tr => !tr.classList.contains('feito') && $('[data-f=sel]', tr).checked).length;
+      if (!n) throw new Error('Marque pelo menos uma linha.');
+      return `Gravar ${n} linha(s) e guardar a(s) foto(s) da folha?`;
+    }, confirmLabel: 'Confirmar gravação', run: async () => {
+      const ler = tr => { const g = k => $(`[data-f=${k}]`, tr).value; return {i: +tr.dataset.fr, data: g('data'), tec: g('tec'), eq: g('eq'), tipo: g('tipo'), hi: g('hi'), hf: g('hf'), desc: g('desc').trim(), os: g('os').replace(/\D/g, '')}; };
+      const sel = $$('#dlgBody tr.fr').filter(tr => !tr.classList.contains('feito') && $('[data-f=sel]', tr).checked);
+      const prontos = [], erros = [];
+      for (const tr of sel) {
+        const x = ler(tr), r = regs[x.i], ex = [];
+        if (!x.data) ex.push('data'); else if (x.data > hoje) ex.push('data no futuro');
+        if (!x.tec) ex.push('técnico'); if (!x.eq) ex.push('equipamento'); if (!x.tipo) ex.push('tipo');
+        if (!!x.hi !== !!x.hf) ex.push('preencha início e fim (ou deixe os dois vazios)'); else if (x.hi && x.hf <= x.hi) ex.push('fim deve ser depois do início');
+        let os = null;
+        if (x.os) { os = S.os.find(o => String(o.numero) === x.os); if (!os) ex.push(`OS ${x.os} não existe`); else if (x.eq && os.equipamento_id !== x.eq) ex.push(`a OS ${x.os} é de outro equipamento`); }
+        if (ex.length) { erros.push(`Linha ${r.linha}: ${ex.join(', ')}`); $('[data-f=sel]', tr).closest('tr').style.outline = '2px solid var(--red)'; continue; }
+        tr.style.outline = '';
+        const upd = r.situacao === 'atualizar_os' && r.registro_existente_id;
+        prontos.push({tr, linha: r.linha, upd, id: r.registro_existente_id, os_id: os?.id || null,
+          row: {equipamento_id: x.eq, tecnico_id: x.tec, tipo_manutencao: x.tipo, data_servico: x.data, hora_inicio: x.hi || null, hora_fim: x.hf || null, descricao: x.desc || null, ordem_servico_id: os?.id || null}, x});
+      }
+      if (erros.length) throw new Error('Corrija antes de gravar → ' + erros.join(' · '));
+      if (!revisaFolha.enviado) {
+        const novos = prontos.filter(p => !p.upd);
+        const base = prontos.length ? prontos : [];
+        const tec = moda(base.map(p => p.x.tec)), dia = moda(base.map(p => p.x.data)), d = new Date();
+        revisaFolha.ids = [];
+        for (const it of itens) {
+          const caminho = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${crypto.randomUUID()}.jpg`;
+          const {error: e1} = await sb.storage.from('folhas-registro').upload(caminho, it.blob, {contentType: 'image/jpeg'});
+          if (e1) throw e1;
+          const {data: f, error: e2} = await sb.from('folha_registro').insert({caminho, tecnico_id: tec, data_folha: dia, qtd_registros: novos.length}).select('id').single();
+          if (e2) throw e2;
+          revisaFolha.ids.push(f.id);
+        }
+        revisaFolha.enviado = true;
+      }
+      let ok = 0; const falhas = [];
+      for (const p of prontos) {
+        try {
+          if (p.upd) {
+            if (!p.os_id) throw new Error('informe o número da OS para atualizar.');
+            const {data, error} = await sb.from('registro_manutencao').update({ordem_servico_id: p.os_id}).eq('id', p.id).select('id');
+            if (error) throw error; if (!data?.length) throw new Error('sem permissão para alterar este registro.');
+          } else {
+            const {error} = await sb.from('registro_manutencao').insert({...p.row, folha_id: revisaFolha.ids[0] || null});
+            if (error) throw error;
+          }
+          ok++; p.tr.classList.add('feito'); $('[data-f=sel]', p.tr).checked = false; $$('input,select', p.tr).forEach(el => el.disabled = true);
+        } catch (e) { falhas.push(`Linha ${p.linha}: ${errMsg(e)}`); p.tr.style.outline = '2px solid var(--red)'; }
+      }
+      if (ok) { await loadAll(); }
+      if (falhas.length) { toast(`${ok} gravada(s), ${falhas.length} com problema.`, 'bad'); throw new Error(`${ok} gravada(s). Não gravou → ` + falhas.join(' · ')); }
+      revisaFolha.enviado = false; closeModal(); toast(`${ok} linha(s) gravada(s) e folha guardada.`, 'good');
+    }}]});
+  revisaFolha.enviado = false;
+  $('#fr_tec').addEventListener('change', e => { if (e.target.value) $$('#dlgBody [data-f=tec]').forEach(s => { if (!s.disabled) { s.value = e.target.value; s.classList.remove('dv'); } }); });
+}
 
 /* ---- checklist (do grupo ou do equipamento) ---- */
 const ACAO_L = {inserir: 'novo', atualizar: 'alterado', remover: 'removido', manter: 'igual', bloqueado: 'bloqueado'};
