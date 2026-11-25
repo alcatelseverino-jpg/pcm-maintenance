@@ -348,7 +348,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
 
       <div class="panel" id="p-ind">
         <div class="ph"><h2>Indicadores</h2>
-          <div class="tabs"><button class="on" data-tab="prod" type="button">Produtividade</button><button data-tab="mm" type="button">MTBF / MTTR</button></div>
+          <div class="tabs"><button class="on" data-tab="prod" type="button">Produtividade</button><button class="btn" id="btnPExp" type="button" title="Exporta a tabela de produtividade para CSV compatível com Excel">⬇ Exportar</button><button data-tab="mm" type="button">MTBF / MTTR</button></div>
         </div>
         <div id="tabProd" class="pb">
           <div class="sub">
@@ -357,7 +357,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
             <label>Técnico <select id="pTec"></select></label>
             <label>Grupo <select id="pGrp"></select></label>
             <button class="btn" id="btnPRel" type="button" title="Abre um relatório de produtividade pronto para imprimir ou salvar em PDF">🖨 Relatório</button>
-            <button class="btn" id="btnPExp" type="button" title="Exporta a tabela para Excel (CSV)">⬇ Excel</button>
+            
           </div>
           <div class="kpis" id="pKpis"></div>
           <table>
@@ -2111,7 +2111,7 @@ bind('#pDe', S.f.prod, 'de', renderProd); bind('#pAte', S.f.prod, 'ate', renderP
 bind('#pTec', S.f.prod, 'tec', renderProd); bind('#pGrp', S.f.prod, 'grupo', renderProd);
 bind('#mDe', S.f.mm, 'de', renderMM); bind('#mAte', S.f.mm, 'ate', renderMM);
 bind('#mGrp', S.f.mm, 'grupo', renderMM); bind('#mEq', S.f.mm, 'eq', renderMM);
-$$('.tabs button').forEach(b => b.addEventListener('click', () => {
+$('.tabs button[data-tab]').forEach(b => b.addEventListener('click', () => {
   $$('.tabs button').forEach(x => x.classList.toggle('on', x === b));
   $('#tabProd').hidden = b.dataset.tab !== 'prod'; $('#tabMM').hidden = b.dataset.tab !== 'mm';
 }));
