@@ -397,7 +397,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
 </dialog>
 <div id="toasts"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script>
 'use strict';
@@ -531,7 +531,7 @@ async function boot() {
     $('#lErr').textContent = 'Não foi possível carregar a biblioteca do Supabase (verifique a conexão com a internet).';
     $('#lErr').hidden = false; $('#lBtn').disabled = true; return;
   }
-  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {auth: {persistSession: true, autoRefreshToken: true}});
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {auth: {persistSession: true, autoRefreshToken: true, lock: async (_n, _t, fn) => await fn()}});
   sb.auth.onAuthStateChange((ev, session) => {
     // não chamar o Supabase diretamente aqui dentro (evita travar): adia para fora do callback
     setTimeout(() => {
@@ -546,7 +546,21 @@ $('#loginForm').addEventListener('submit', async ev => {
   ev.preventDefault();
   const btn = $('#lBtn'), err = $('#lErr');
   btn.disabled = true; err.hidden = true;
-  const {error} = await sb.auth.signInWithPassword({email: $('#lEmail').value.trim(), password: $('#lPass').value});
+  const esp = new Promise(res => setTimeout(() => res({timeout: true}), 20000));
+  const r = await Promise.race([sb.auth.signInWithPassword({email: $('#lEmail').value.trim(), password: $('#lPass').value}), esp]);
+  if (r.timeout) {
+    let diag = '';
+    try {
+      const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 8000);
+      const h = await fetch(SUPABASE_URL + '/auth/v1/health', {headers: {apikey: SUPABASE_KEY}, signal: ac.signal});
+      clearTimeout(t);
+      diag = h.ok ? ' O servidor do Supabase responde (HTTP ' + h.status + '); o problema é neste navegador/endereço.' : ' O Supabase respondeu HTTP ' + h.status + '.';
+    } catch (e) { diag = ' Este computador/rede não conseguiu falar com o Supabase (' + (e.name === 'AbortError' ? 'sem resposta em 8 s' : e.message) + ').'; }
+    btn.disabled = false;
+    err.textContent = 'O login demorou demais (20 s) e foi interrompido.' + diag + ' Tente de novo ou use uma janela anônima.';
+    err.hidden = false; return;
+  }
+  const {error} = r;
   btn.disabled = false;
   if (error) { err.textContent = error.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : error.message; err.hidden = false; }
 });
