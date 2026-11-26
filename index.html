@@ -234,6 +234,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
     <button class="btn" id="btnFolhasPapel" type="button" title="Gerar e controlar as folhas de registro numeradas">📄 Folhas</button>
     <button class="btn" id="btnFolha" type="button" title="Fotografar a folha de registro e ler as linhas">📷 Ler folha por foto</button>
     <button class="btn" id="btnNC" type="button" title="Itens do checklist marcados como Não OK">⚠ Não conformidades<span class="ncn" id="ncN" hidden></span></button>
+    <button class="btn" id="btnCfgPdf" type="button" title="Tamanho e posição da impressão da OS">⚙ Impressão</button>
     <button class="btn" id="btnReload" type="button">↻ Atualizar</button>
     <button class="btn" id="btnOut" type="button">Sair</button>
   </header>
@@ -614,6 +615,7 @@ async function loadAll() {
     S.regd = regd;
     S.ncs = ncs;
     S.feriados = fers; S.ausencias = auss;
+    await carregaCfgPdf();
     S.planoById = new Map(planos.map(p => [p.id, p]));
     S.edGrupos = S.admin
       ? (edg.data || [])
@@ -1011,6 +1013,42 @@ function openNC() {
 $('#btnNC').addEventListener('click', openNC);
 $('#btnFolha').addEventListener('click', openFolha);
 $('#btnFolhasPapel').addEventListener('click', openFolhasPapel);
+
+/* ---- configuração da impressão da OS ---- */
+function openCfgPdf() {
+  const adm = !!S.admin, dis = adm ? '' : ' disabled';
+  const campo = (k, rot, dica, step) => `<label style="display:block;margin:0 0 12px"><b>${rot}</b>
+    <input id="cfg_${k}" type="number" step="${step}" min="${PDF_CFG_LIM[k][0]}" max="${PDF_CFG_LIM[k][1]}" value="${PDF_CFG[k]}"${dis} style="width:110px;margin-left:8px">
+    <div class="muted" style="font-size:12px">${dica}</div></label>`;
+  openModal({
+    title: 'Impressão da OS',
+    body: `<p class="muted" style="margin-top:0">Vale para todos os computadores e navegadores que entram neste sistema (fica salvo no banco). ${adm ? '' : '<b>Só o administrador altera.</b>'}</p>
+      ${campo('escala', 'Tamanho (%)', 'Menor que 100 deixa margem em volta; maior que 100 aumenta. Padrão: 94. Limites: 70 a 105.', 1)}
+      ${campo('dx', 'Mover para a direita (mm)', 'Use valor negativo para mover para a esquerda. Limites: -20 a 20.', 0.5)}
+      ${campo('dy', 'Mover para baixo (mm)', 'Use valor negativo para mover para cima. Limites: -20 a 20.', 0.5)}
+      <p class="muted" style="font-size:12px">Depois de salvar, imprima uma OS para conferir. O ajuste é aplicado na hora de abrir o PDF.</p>`,
+    closeLabel: 'Fechar',
+    actions: adm ? [
+      {label: 'Voltar ao padrão', run: async () => { $('#cfg_escala').value = 94; $('#cfg_dx').value = 0; $('#cfg_dy').value = 0; }, keepOpen: true},
+      {label: 'Salvar', cls: 'pri', run: async () => {
+        const novo = {};
+        for (const k of Object.keys(PDF_CFG)) {
+          const v = Number($('#cfg_' + k).value);
+          if (!Number.isFinite(v) || v < PDF_CFG_LIM[k][0] || v > PDF_CFG_LIM[k][1]) throw new Error(`Valor fora do limite (${PDF_CFG_LIM[k][0]} a ${PDF_CFG_LIM[k][1]}).`);
+          novo[k] = v;
+        }
+        for (const [k, ch] of Object.entries(PDF_CFG_CHAVES)) {
+          const {data, error} = await sb.from('app_config_os').update({valor: String(novo[k]), atualizado_em: new Date().toISOString()}).eq('chave', ch).select('chave');
+          if (error) throw error;
+          if (!data?.length) throw new Error('Não foi possível gravar (sem permissão).');
+        }
+        Object.assign(PDF_CFG, novo);
+        closeModal(); toast('Configuração de impressão salva.', 'good');
+      }}
+    ] : []
+  });
+}
+$('#btnCfgPdf').addEventListener('click', openCfgPdf);
 $('#dlgBody').addEventListener('click', async e => {
   const ok = e.target.closest('[data-ncok]'), no = e.target.closest('[data-ncno]');
   if (!ok && !no) return;
@@ -1286,14 +1324,30 @@ async function fetchOSPdf(numero, session) {
 }
 // mostra o PDF na aba aberta no clique, com botões Baixar (nome = número da OS) e Imprimir
 // A impressora não imprime até a borda da folha e o PDF da OS usa a página inteira: reduz cada página (centralizada) para sobrar margem de segurança.
-const PDF_ESCALA = 0.94;
+// Ajuste de impressão da OS (⚙ Impressão): guardado no banco (app_config_os) para valer em qualquer computador/site.
+const PDF_CFG = {escala: 94, dx: 0, dy: 0};   // escala em %, deslocamento em mm (dx + = direita, dy + = para baixo)
+const PDF_CFG_CHAVES = {escala: 'pdf_escala', dx: 'pdf_desloc_x', dy: 'pdf_desloc_y'};
+const PDF_CFG_LIM = {escala: [70, 105], dx: [-20, 20], dy: [-20, 20]};
+const limitaCfg = (k, v) => Math.min(PDF_CFG_LIM[k][1], Math.max(PDF_CFG_LIM[k][0], Number.isFinite(v) ? v : PDF_CFG[k]));
+async function carregaCfgPdf() {
+  try {
+    const {data, error} = await sb.from('app_config_os').select('chave,valor').in('chave', Object.values(PDF_CFG_CHAVES));
+    if (error) throw error;
+    for (const [k, ch] of Object.entries(PDF_CFG_CHAVES)) {
+      const r = (data || []).find(x => x.chave === ch);
+      const n = r ? Number(String(r.valor).replace(',', '.')) : NaN;
+      if (Number.isFinite(n)) PDF_CFG[k] = limitaCfg(k, n);
+    }
+  } catch (_) { /* mantém os valores atuais */ }
+}
 async function addComMargem(out, src) {
   for (const i of src.getPageIndices()) {
     let ok = false;
     try { ok = !!src.getPage(i).node.Contents(); } catch (_) {}
     if (!ok) { (await out.copyPages(src, [i])).forEach(p => out.addPage(p)); continue; }   // página sem conteúdo: copia como está
-    const [e] = await out.embedPdf(src, [i]), k = PDF_ESCALA, p = out.addPage([e.width, e.height]);
-    p.drawPage(e, {x: e.width * (1 - k) / 2, y: e.height * (1 - k) / 2, xScale: k, yScale: k});
+    const [e] = await out.embedPdf(src, [i]), k = limitaCfg('escala', PDF_CFG.escala) / 100, p = out.addPage([e.width, e.height]);
+    const MM = 72 / 25.4;   // mm -> pontos do PDF
+    p.drawPage(e, {x: e.width * (1 - k) / 2 + limitaCfg('dx', PDF_CFG.dx) * MM, y: e.height * (1 - k) / 2 - limitaCfg('dy', PDF_CFG.dy) * MM, xScale: k, yScale: k});
   }
 }
 async function pdfComMargem(buf) {
