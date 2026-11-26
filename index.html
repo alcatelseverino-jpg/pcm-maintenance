@@ -242,7 +242,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
   <main class="grid">
     <!-- ESQUERDA: ORDENS DE SERVIÇO -->
     <section class="panel" id="p-os">
-      <div class="ph"><h2>Ordens de serviço</h2><span class="sp"></span><button class="btn" id="btnPrintSel" type="button" hidden>🖨 Imprimir</button><button class="btn" id="btnOSExp" type="button" title="Exporta a lista atual para Excel (CSV)">⬇ Excel</button><span class="muted" id="osCount"></span></div>
+      <div class="ph"><h2>Ordens de serviço</h2><span class="sp"></span><button class="btn" id="btnPrintSel" type="button" hidden>🖨 Imprimir</button><button class="btn" id="btnOSExp" type="button" title="Exporta a lista atual para Excel (CSV)">⬇ Excel</button><button class="btn" id="btnExport" type="button" title="Exportar registros de manutenção ou ordens de serviço de um período, com filtros">⬇ Exportar…</button><span class="muted" id="osCount"></span></div>
       <div class="sub">
         <input type="search" id="osQ" placeholder="Buscar nº, equipamento, técnico…">
         <select id="osSt">
@@ -2184,6 +2184,149 @@ $$('.tabs button[data-tab]').forEach(b => b.addEventListener('click', () => {
   $$('.tabs button').forEach(x => x.classList.toggle('on', x === b));
   $('#tabProd').hidden = b.dataset.tab !== 'prod'; $('#tabMM').hidden = b.dataset.tab !== 'mm';
 }));
+
+/* ================= exportação filtrada (Registros de manutenção / Ordens de serviço) ================= */
+const csvCell = v => {
+  if (v == null) return '';
+  if (typeof v === 'number') return String(v).replace('.', ',');
+  let s = String(v).replace(/\s+/g, ' ').trim();
+  if (/^[=+@]/.test(s)) s = "'" + s;                       // evita que o Excel execute texto como fórmula
+  return '"' + s.replace(/"/g, '""') + '"';
+};
+function downloadCsv(head, rows, nome) {
+  const txt = [head, ...rows].map(r => r.map(csvCell).join(';')).join('\r\n');
+  const blob = new Blob(['﻿' + txt], {type: 'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+const fmtDH = v => v ? new Date(v).toLocaleString('pt-BR', {timeZone: TZ, dateStyle: 'short', timeStyle: 'short'}) : '';
+const hDec = min => Math.round(min / 60 * 100) / 100;
+
+function exInit() {
+  if (S.ex) return;
+  const [a, b] = S.f.os.mode === 'tudo' ? [iso(firstOfMonth()), iso(new Date())] : periodRange(S.f.os.mode, S.f.os.ref);
+  S.ex = {
+    tab: 'reg',
+    reg: {de: a, ate: b, tec: '', grupo: '', eq: '', tipo: '', vinc: '', q: '', ord: 'data'},
+    os:  {campo: 'data_abertura', de: a, ate: b, status: '', tipo: '', prio: '', tec: '', grupo: '', eq: '', prazo: '', q: ''}
+  };
+}
+const exIn = (k, de, ate) => k && (!de || k >= de) && (!ate || k <= ate);
+
+function exRegRows() {
+  const f = S.ex.reg, q = f.q.trim().toLowerCase(), eq = f.eq.trim().toLowerCase();
+  const rows = S.regd.filter(r => {
+    if (!exIn(r.data, f.de, f.ate)) return false;
+    if (f.tec && r.tecnico !== f.tec) return false;
+    if (f.grupo && (r.grupo || '') !== f.grupo) return false;
+    if (eq && !String(r.equipamento_codigo || '').toLowerCase().includes(eq)) return false;
+    if (f.tipo && r.tipo !== f.tipo) return false;
+    if (f.vinc === 'com' && !r.ordem_servico) return false;
+    if (f.vinc === 'sem' && r.ordem_servico) return false;
+    if (q && ![r.descricao, r.equipamento, r.ordem_servico].join(' ').toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const key = {data: r => r.data + (r.inicio || ''), tecnico: r => (r.tecnico || '') + r.data, equipamento: r => (r.equipamento_codigo || '') + r.data, grupo: r => (r.grupo || '') + r.data}[f.ord];
+  return rows.sort((a, b) => key(a).localeCompare(key(b), 'pt-BR', {numeric: true}));
+}
+function exOsRows() {
+  const f = S.ex.os, q = f.q.trim().toLowerCase(), eq = f.eq.trim().toLowerCase(), now = Date.now();
+  const prazo = o => {
+    if (!o.data_limite) return '';
+    const lim = new Date(o.data_limite).getTime();
+    if (o.status === 'concluida') return o.data_conclusao && new Date(o.data_conclusao).getTime() > lim ? 'Concluída fora do prazo' : 'Concluída no prazo';
+    return now > lim ? 'Atrasada' : 'No prazo';
+  };
+  const regN = new Map();
+  S.regd.forEach(r => { if (!r.ordem_servico) return; const x = regN.get(r.ordem_servico) || {n: 0, min: 0}; x.n++; x.min += tempoMin(r.tempo); regN.set(r.ordem_servico, x); });
+  return S.os.filter(o => {
+    const e = S.eqById.get(o.equipamento_id);
+    if ((f.de || f.ate) && !exIn(o[f.campo] ? dayKey(o[f.campo]) : '', f.de, f.ate)) return false;
+    if (f.status && o.status !== f.status) return false;
+    if (f.tipo && o.tipo !== f.tipo) return false;
+    if (f.prio && o.prioridade !== f.prio) return false;
+    if (f.tec === '__sem') { if (o.tecnico_id) return false; } else if (f.tec && o.tecnico_id !== f.tec) return false;
+    if (f.grupo && e?.grupo_id !== f.grupo) return false;
+    if (eq && !String(e?.codigo || '').toLowerCase().includes(eq)) return false;
+    if (f.prazo === 'atrasada' && prazo(o) !== 'Atrasada') return false;
+    if (f.prazo === 'fora' && prazo(o) !== 'Concluída fora do prazo') return false;
+    if (f.prazo === 'ok' && !['No prazo', 'Concluída no prazo'].includes(prazo(o))) return false;
+    if (q && ![o.numero, o.titulo, o.servico_executado, e?.nome].join(' ').toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a, b) => new Date(a.data_abertura) - new Date(b.data_abertura)).map(o => ({o, e: S.eqById.get(o.equipamento_id), prazo: prazo(o), reg: regN.get(o.numero) || {n: 0, min: 0}}));
+}
+
+function exSummary() {
+  const s = S.ex;
+  if (s.tab === 'reg') {
+    const r = exRegRows(), min = r.reduce((t, x) => t + tempoMin(x.tempo), 0);
+    return `<b>${r.length}</b> registro(s) · <b>${tempoFmt(min)}</b> de tempo total`;
+  }
+  const r = exOsRows(), c = k => r.filter(x => x.o.status === k).length;
+  return `<b>${r.length}</b> OS · ${c('aberta')} abertas · ${c('em_execucao')} em execução · ${c('concluida')} concluídas`;
+}
+function renderExport() {
+  exInit();
+  const s = S.ex, f = s[s.tab];
+  const sel = (k, pairs, blank) => `<select data-ex="${k}">${optList(pairs, f[k.split('.')[1]], blank)}</select>`;
+  const inp = (k, type, extra = '') => `<input data-ex="${k}" type="${type}" value="${esc(f[k.split('.')[1]])}" ${extra}>`;
+  const grpOpts = S.grupos.map(g => [s.tab === 'reg' ? g.nome : g.id, g.nome]);
+  let body;
+  if (s.tab === 'reg') {
+    body =
+      fld('Data inicial', inp('reg.de', 'date')) + fld('Data final', inp('reg.ate', 'date')) +
+      fld('Técnico', sel('reg.tec', S.tecnicos.map(t => [t.nome, t.nome]), 'Todos')) +
+      fld('Grupo de equipamentos', sel('reg.grupo', grpOpts, 'Todos')) +
+      fld('Equipamento (código)', inp('reg.eq', 'text', 'list="dlEq" placeholder="Todos"') + equipDatalist()) +
+      fld('Tipo de manutenção', sel('reg.tipo', Object.entries(L.tipo), 'Todos')) +
+      fld('Vínculo com OS', sel('reg.vinc', [['com', 'Somente com OS'], ['sem', 'Somente sem OS']], 'Todos')) +
+      fld('Ordenar por', sel('reg.ord', [['data', 'Data'], ['tecnico', 'Técnico'], ['equipamento', 'Equipamento'], ['grupo', 'Grupo']])) +
+      fld('Buscar no texto', inp('reg.q', 'search', 'placeholder="Descrição, equipamento ou nº da OS"'), {full: true});
+  } else {
+    body =
+      fld('Filtrar período pela data de', sel('os.campo', [['data_abertura', 'Abertura'], ['data_conclusao', 'Conclusão'], ['data_limite', 'Limite (prazo)']])) + '<div></div>' +
+      fld('Data inicial', inp('os.de', 'date')) + fld('Data final', inp('os.ate', 'date')) +
+      fld('Status', sel('os.status', Object.entries(L.os), 'Todos')) +
+      fld('Prazo', sel('os.prazo', [['atrasada', 'Atrasadas (abertas após o limite)'], ['fora', 'Concluídas fora do prazo'], ['ok', 'Dentro do prazo']], 'Todos')) +
+      fld('Tipo', sel('os.tipo', Object.entries(L.tipo), 'Todos')) +
+      fld('Prioridade', sel('os.prio', Object.entries(L.prio), 'Todas')) +
+      fld('Técnico', sel('os.tec', [['__sem', '— sem técnico —'], ...S.tecnicos.map(t => [t.id, t.nome])], 'Todos')) +
+      fld('Grupo de equipamentos', sel('os.grupo', grpOpts, 'Todos')) +
+      fld('Equipamento (código)', inp('os.eq', 'text', 'list="dlEq" placeholder="Todos"') + equipDatalist()) + '<div></div>' +
+      fld('Buscar no texto', inp('os.q', 'search', 'placeholder="Nº da OS, título, equipamento ou serviço executado"'), {full: true});
+  }
+  const tabs = `<div class="tabs gt">${[['reg', 'Registros de manutenção'], ['os', 'Ordens de serviço']].map(([k, l]) => `<button type="button" data-ext="${k}" class="${s.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  openModal({
+    title: 'Exportar para Excel', wide: true, closeLabel: 'Fechar',
+    body: `<div class="full">${tabs}</div>${body}<div class="full sub" id="exSum" style="border:1px solid var(--line);border-radius:8px">${exSummary()}</div>`,
+    actions: [{label: '⬇ Baixar Excel (CSV)', cls: 'pri', run: exDownload}]
+  });
+}
+async function exDownload() {
+  const s = S.ex, hoje = todayIso();
+  if (s.tab === 'reg') {
+    const r = exRegRows(); if (!r.length) throw new Error('Nenhum registro neste filtro.');
+    downloadCsv(['Data', 'Dia', 'Início', 'Fim', 'Tempo', 'Horas (decimal)', 'Técnico', 'Cód. equipamento', 'Equipamento', 'Grupo', 'OS', 'Tipo', 'Descrição'],
+      r.map(x => [fmtDia(x.data), dowOf(x.data), x.inicio || '', x.fim || '', x.tempo || '', hDec(tempoMin(x.tempo)), x.tecnico, x.equipamento_codigo, x.equipamento, x.grupo || '', x.ordem_servico || '', L.tipo[x.tipo] || x.tipo, x.descricao]),
+      `registros_manutencao_${s.reg.de || 'inicio'}_a_${s.reg.ate || hoje}.csv`);
+  } else {
+    const r = exOsRows(); if (!r.length) throw new Error('Nenhuma OS neste filtro.');
+    downloadCsv(['Nº OS', 'Cód. equipamento', 'Equipamento', 'Grupo', 'Técnico', 'Tipo', 'Status', 'Prioridade', 'Título', 'Abertura', 'Limite', 'Conclusão', 'SLA (h)', 'Prazo', 'Tempo gasto (h)', 'Nº registros', 'Horas registradas', 'Serviço executado'],
+      r.map(({o, e, prazo, reg}) => [o.numero, e?.codigo || '', e?.nome || '', S.grpById.get(e?.grupo_id)?.nome || '', S.tecById.get(o.tecnico_id)?.nome || '', L.tipo[o.tipo] || o.tipo || '', L.os[o.status] || o.status, L.prio[o.prioridade] || o.prioridade || '', o.titulo || '',
+        fmtDH(o.data_abertura), fmtDH(o.data_limite), fmtDH(o.data_conclusao), o.sla_horas ?? '', prazo, o.tempo_gasto_minutos != null ? hDec(o.tempo_gasto_minutos) : '', reg.n, hDec(reg.min), o.servico_executado || '']),
+      `ordens_servico_${s.os.de || 'inicio'}_a_${s.os.ate || hoje}.csv`);
+  }
+  toast('Arquivo gerado.', 'good');
+}
+$('#btnExport').addEventListener('click', renderExport);
+$('#dlgBody').addEventListener('click', e => { const t = e.target.closest('[data-ext]'); if (t && S.ex) { S.ex.tab = t.dataset.ext; renderExport(); } });
+const exOnEdit = e => {
+  const el = e.target.closest('[data-ex]'); if (!el || !S.ex) return;
+  const [tab, key] = el.dataset.ex.split('.'); S.ex[tab][key] = el.value;
+  const sm = $('#exSum'); if (sm) sm.innerHTML = exSummary();
+};
+$('#dlgBody').addEventListener('input', exOnEdit);
+$('#dlgBody').addEventListener('change', exOnEdit);
 
 /* ---------- modal: fechar ---------- */
 $('#dlgX').addEventListener('click', closeModal);
