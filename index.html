@@ -2180,7 +2180,7 @@ bind('#pDe', S.f.prod, 'de', renderProd); bind('#pAte', S.f.prod, 'ate', renderP
 bind('#pTec', S.f.prod, 'tec', renderProd); bind('#pGrp', S.f.prod, 'grupo', renderProd);
 bind('#mDe', S.f.mm, 'de', renderMM); bind('#mAte', S.f.mm, 'ate', renderMM);
 bind('#mGrp', S.f.mm, 'grupo', renderMM); bind('#mEq', S.f.mm, 'eq', renderMM);
-$('.tabs button[data-tab]').forEach(b => b.addEventListener('click', () => {
+$$('.tabs button[data-tab]').forEach(b => b.addEventListener('click', () => {
   $$('.tabs button').forEach(x => x.classList.toggle('on', x === b));
   $('#tabProd').hidden = b.dataset.tab !== 'prod'; $('#tabMM').hidden = b.dataset.tab !== 'mm';
 }));
