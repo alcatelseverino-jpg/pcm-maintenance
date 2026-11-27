@@ -1840,6 +1840,9 @@ function openFolha() {
   });
 }
 
+// tipo do registro: com OS vale o tipo da OS (checklist conta como preventiva); sem OS é não programada (o banco aplica a mesma regra)
+const tipoRegPelaOS = os => !os ? 'nao_programada' : os.tipo === 'corretiva' ? 'corretiva' : 'preventiva';
+const tipoRegTxt = num => { num = String(num || '').replace(/\D/g, ''); if (!num) return L.regTipo.nao_programada; const o = S.os.find(x => String(x.numero) === num); return o ? L.regTipo[tipoRegPelaOS(o)] : 'OS não encontrada'; };
 function revisaFolha(j, itens, fp) {
   const hoje = todayIso();
   const tecOpts = S.tecnicos.filter(t => t.ativo !== false).map(t => [t.id, t.nome]);
@@ -1853,7 +1856,7 @@ function revisaFolha(j, itens, fp) {
       <td><input type="date" data-f="data" class="${dv(r, 'data')}" value="${esc(r.data || '')}" max="${hoje}"></td>
       <td><select data-f="tec" class="${dv(r, 'tecnico')}">${optList(tecOpts, r.tecnico_id, '—')}</select></td>
       <td><select data-f="eq" class="${dv(r, 'equipamento')}">${optList(eqOpts, r.equipamento_id, '—')}</select></td>
-      <td><select data-f="tipo" class="${dv(r, 'tipo')}">${optList([['preventiva', 'Preventiva'], ['corretiva', 'Corretiva'], ['nao_programada', 'Não programada']], r.tipo, '—')}</select></td>
+      <td class="ftipo nw" data-ftipo title="Definido pela OS: com OS vale o tipo da OS; sem OS é não programada">${esc(tipoRegTxt(r.numero_os))}</td>
       <td><input type="time" data-f="hi" class="${dv(r, 'hora_inicio')}" value="${esc(r.hora_inicio || '')}"></td>
       <td><input type="time" data-f="hf" class="${dv(r, 'hora_fim')}" value="${esc(r.hora_fim || '')}"></td>
       <td><input type="text" data-f="desc" class="${dv(r, 'descricao')}" value="${esc(r.descricao || '')}"></td>
@@ -1869,13 +1872,13 @@ function revisaFolha(j, itens, fp) {
       if (!n) throw new Error('Marque pelo menos uma linha.');
       return `Gravar ${n} linha(s) e guardar a(s) foto(s) da folha?`;
     }, confirmLabel: 'Confirmar gravação', run: async () => {
-      const ler = tr => { const g = k => $(`[data-f=${k}]`, tr).value; return {i: +tr.dataset.fr, data: g('data'), tec: g('tec'), eq: g('eq'), tipo: g('tipo'), hi: g('hi'), hf: g('hf'), desc: g('desc').trim(), os: g('os').replace(/\D/g, ''), lin: parseInt(g('lin'), 10) || null}; };
+      const ler = tr => { const g = k => $(`[data-f=${k}]`, tr).value; return {i: +tr.dataset.fr, data: g('data'), tec: g('tec'), eq: g('eq'), hi: g('hi'), hf: g('hf'), desc: g('desc').trim(), os: g('os').replace(/\D/g, ''), lin: parseInt(g('lin'), 10) || null}; };
       const sel = $$('#dlgBody tr.fr').filter(tr => !tr.classList.contains('feito') && $('[data-f=sel]', tr).checked);
       const prontos = [], erros = [];
       for (const tr of sel) {
         const x = ler(tr), r = regs[x.i], ex = [];
         if (!x.data) ex.push('data'); else if (x.data > hoje) ex.push('data no futuro');
-        if (!x.tec) ex.push('técnico'); if (!x.eq) ex.push('equipamento'); if (!x.tipo) ex.push('tipo');
+        if (!x.tec) ex.push('técnico'); if (!x.eq) ex.push('equipamento');
         if (!!x.hi !== !!x.hf) ex.push('preencha início e fim (ou deixe os dois vazios)'); else if (x.hi && x.hf <= x.hi) ex.push('fim deve ser depois do início');
         if (fp && (!x.lin || x.lin > fp.linhas)) ex.push(`linha da folha entre 1 e ${fp.linhas}`);
         let os = null;
@@ -1884,7 +1887,7 @@ function revisaFolha(j, itens, fp) {
         tr.style.outline = '';
         const upd = r.situacao === 'atualizar_os' && r.registro_existente_id;
         prontos.push({tr, linha: r.linha, upd, id: r.registro_existente_id, os_id: os?.id || null,
-          row: {equipamento_id: x.eq, tecnico_id: x.tec, tipo_manutencao: x.tipo, data_servico: x.data, hora_inicio: x.hi || null, hora_fim: x.hf || null, descricao: x.desc || null, ordem_servico_id: os?.id || null, folha_papel_id: fp?.id || null, linha_folha: fp ? x.lin : null}, x});
+          row: {equipamento_id: x.eq, tecnico_id: x.tec, tipo_manutencao: tipoRegPelaOS(os), data_servico: x.data, hora_inicio: x.hi || null, hora_fim: x.hf || null, descricao: x.desc || null, ordem_servico_id: os?.id || null, folha_papel_id: fp?.id || null, linha_folha: fp ? x.lin : null}, x});
       }
       if (erros.length) throw new Error('Corrija antes de gravar → ' + erros.join(' · '));
       if (!revisaFolha.enviado) {
@@ -2319,6 +2322,10 @@ async function exDownload() {
   }
   toast('Arquivo gerado.', 'good');
 }
+$('#dlgBody').addEventListener('input', e => {
+  const i = e.target.closest('[data-f=os]'); if (!i) return;
+  const c = i.closest('tr.fr')?.querySelector('[data-ftipo]'); if (c) c.textContent = tipoRegTxt(i.value);
+});
 $('#btnExport').addEventListener('click', renderExport);
 $('#dlgBody').addEventListener('click', e => { const t = e.target.closest('[data-ext]'); if (t && S.ex) { S.ex.tab = t.dataset.ext; renderExport(); } });
 const exOnEdit = e => {
