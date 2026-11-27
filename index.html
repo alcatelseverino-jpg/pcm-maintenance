@@ -2135,9 +2135,35 @@ function reportEquipData() {
     const x = equipment.get(key); x.n++; x.h += hours(r);
   });
   const sum = list => list.reduce((a,r) => a + hours(r), 0);
+  // Produtividade global pelo mesmo critério de disponibilidade do painel atual.
+  const hoje = iso(new Date());
+  const inPer = d => d && (!f.de || d >= f.de) && (!f.ate || d <= f.ate) && d <= hoje;
+  const isMei = id => S.tecById.get(id)?.regime === 'mei';
+  const diasClt = new Set(), diasMei = new Map();
+  S.regs.forEach(r => {
+    if (!inPer(r.data_servico)) return;
+    if (!isMei(r.tecnico_id)) diasClt.add(r.data_servico);
+    else { if (!diasMei.has(r.tecnico_id)) diasMei.set(r.tecnico_id, new Set()); diasMei.get(r.tecnico_id).add(r.data_servico); }
+  });
+  const feriados = new Set((S.feriados || []).map(x => x.data));
+  const emAus = (id,d) => (S.ausencias || []).some(a => a.tecnico_id === id && d >= a.data_inicio && d <= a.data_fim);
+  const minDia = d => { const w = new Date(+d.slice(0,4),+d.slice(5,7)-1,+d.slice(8,10)).getDay(); return w===0?0:w===6?240:480; };
+  const fim = f.ate && f.ate < hoje ? f.ate : hoje;
+  const availableFor = id => {
+    let dias, ini = '';
+    if (isMei(id)) { const mine=diasMei.get(id); if(!mine || !mine.size) return 0; ini=[...mine].sort()[0]; dias=new Set([...diasClt,...mine]); }
+    else dias=diasClt;
+    let m=0;
+    dias.forEach(d=>{if(d>=ini && d<=fim && (!f.de || d>=f.de) && !feriados.has(d) && !emAus(id,d)) m+=minDia(d);});
+    return m;
+  };
+  const activeTechs = new Set(filtered.map(r => r.tecnico_id).filter(Boolean));
+  const availableMinutes = [...activeTechs].reduce((a,id)=>a+availableFor(id),0);
+  const productivity = availableMinutes ? sum(filtered)*60/availableMinutes*100 : null;
   return {filtered, machines, service, groups:[...groups.values()].sort((a,b)=>b.h-a.h),
     equipment:[...equipment.values()].sort((a,b)=>b.h-a.h), total:sum(filtered),
-    machineHours:sum(machines), serviceHours:sum(service), hours};
+    machineHours:sum(machines), serviceHours:sum(service), hours,
+    availableHours:availableMinutes/60, productivity};
 }
 
 function reportEquipChartsHTML(d) {
@@ -2167,17 +2193,24 @@ function reportEquipChartsHTML(d) {
     const label=x[0].slice(5,7)+'/'+x[0].slice(2,4);
     return '<div style="flex:1;min-width:22px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:128px"><span style="font-size:10px">'+fmt(x[1])+'</span><div title="'+label+': '+fmt(x[1])+' h" style="width:70%;height:'+height+'%;min-height:3px;background:#3978a8;border-radius:4px 4px 0 0"></div><span style="font-size:10px;white-space:nowrap">'+label+'</span></div>';
   }).join('');
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:14px 0">'+
+  const pct = d.productivity == null ? null : Math.round(d.productivity);
+  const globalProd = '<section class="panel" style="padding:12px;grid-column:1/-1"><h3 style="margin:0 0 8px">Produtividade global</h3><div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><strong style="font-size:28px;color:#168779">'+(pct==null?'—':pct+'%')+'</strong><span>'+fmt(d.total)+' h registradas de '+fmt(d.availableHours)+' h disponíveis</span></div><div style="height:16px;background:var(--line);border-radius:10px;overflow:hidden;margin:10px 0 5px"><div style="height:100%;width:'+Math.max(0,Math.min(100,pct||0))+'%;background:#168779;border-radius:10px"></div></div><div class="note">Índice consolidado: horas registradas ÷ horas disponíveis da equipe considerada no período. Pode ultrapassar 100%. Sem nomes ou resultados individuais.</div></section>';
+  const globalMonths = new Map();
+  d.filtered.forEach(r=>{const m=(r.data_servico||'').slice(0,7);if(m)globalMonths.set(m,(globalMonths.get(m)||0)+d.hours(r));});
+  const globalMonthly=[...globalMonths.entries()].sort((a,b)=>a[0].localeCompare(b[0])).slice(-12);
+  const globalMax=Math.max(1,...globalMonthly.map(x=>x[1]));
+  const globalBars=globalMonthly.map(x=>'<div style="flex:1;min-width:22px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:128px"><span style="font-size:10px">'+fmt(x[1])+'</span><div style="width:70%;height:'+Math.max(3,x[1]/globalMax*100)+'%;min-height:3px;background:#168779;border-radius:4px 4px 0 0"></div><span style="font-size:10px;white-space:nowrap">'+x[0].slice(5,7)+'/'+x[0].slice(2,4)+'</span></div>').join('');
+  return globalProd+'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:14px 0">'+
     '<section class="panel" style="padding:12px"><h3 style="margin:0 0 10px">Horas por grupo — Top 10</h3>'+(bars||'<div class="empty">Sem dados para o período.</div>')+'</section>'+
     '<section class="panel" style="padding:12px"><h3 style="margin:0 0 12px">Distribuição por tipo</h3><div style="display:flex;height:18px;border-radius:8px;overflow:hidden;background:var(--line)">'+typeBar+'</div><div style="margin-top:12px">'+typeLegend+'</div><div class="note">Percentuais calculados sobre as horas dos equipamentos.</div></section>'+
-    '<section class="panel" style="padding:12px;grid-column:1/-1"><h3 style="margin:0 0 8px">Evolução mensal de horas</h3><div style="display:flex;align-items:flex-end;gap:8px;overflow-x:auto;padding:8px 2px 2px;min-height:145px">'+(monthBars||'<div class="empty">Sem dados mensais.</div>')+'</div></section></div>';
+    '<section class="panel" style="padding:12px;grid-column:1/-1"><h3 style="margin:0 0 8px">Evolução mensal de horas — consolidado global</h3><div style="display:flex;align-items:flex-end;gap:8px;overflow-x:auto;padding:8px 2px 2px;min-height:145px">'+(globalBars||'<div class="empty">Sem dados mensais.</div>')+'</div></section></div>';
 }
 
 function reportEquipResultsHTML() {
   const d = reportEquipData(), fmt = v => Number(v || 0).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1});
   const typeHours = type => d.machines.filter(r => r.tipo_manutencao === type).reduce((a,r)=>a+d.hours(r),0);
-  const kpis = [['Horas totais',fmt(d.total)+' h'],['Horas em equipamentos',fmt(d.machineHours)+' h'],
-    ['Mão de obra / serviços',fmt(d.serviceHours)+' h'],['Registros filtrados',d.filtered.length.toLocaleString('pt-BR')]];
+  const kpis = [['Horas totais',fmt(d.total)+' h'],['Horas disponíveis',fmt(d.availableHours)+' h'],
+    ['Produtividade global',d.productivity==null?'—':Math.round(d.productivity)+'%'],['Registros filtrados',d.filtered.length.toLocaleString('pt-BR')]];
   const groupRows = d.groups.map(x=>'<tr><td><b>'+esc(x.name)+'</b></td><td class="num">'+x.n+'</td><td class="num"><b>'+fmt(x.h)+'</b></td><td class="num">'+fmt(x.prev)+'</td><td class="num">'+fmt(x.corr)+'</td><td class="num">'+fmt(x.np)+'</td></tr>').join('');
   const equipmentRows = d.equipment.slice(0,30).map(x=>'<tr><td class="mono">'+esc(x.code)+'</td><td>'+esc(x.name)+'</td><td>'+esc(x.group)+'</td><td class="num">'+x.n+'</td><td class="num"><b>'+fmt(x.h)+'</b></td></tr>').join('');
   return '<div class="kpis">'+kpis.map(x=>'<div class="kpi"><b>'+x[1]+'</b><span>'+x[0]+'</span></div>').join('')+'</div>'+
