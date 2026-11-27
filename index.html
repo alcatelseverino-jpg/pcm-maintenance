@@ -2139,6 +2139,40 @@ function reportEquipData() {
     equipment:[...equipment.values()].sort((a,b)=>b.h-a.h), total:sum(filtered),
     machineHours:sum(machines), serviceHours:sum(service), hours};
 }
+
+function reportEquipChartsHTML(d) {
+  const fmt = v => Number(v || 0).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1});
+  const max = Math.max(1, ...d.groups.map(x=>x.h));
+  const bars = d.groups.slice(0,10).map(x => {
+    const pct = Math.max(0, Math.min(100, x.h/max*100));
+    return '<div style="display:grid;grid-template-columns:minmax(90px,1.1fr) minmax(90px,3fr) 64px;gap:8px;align-items:center;margin:8px 0"><span style="font-size:12px;overflow-wrap:anywhere">'+esc(x.name)+'</span><div style="height:14px;background:var(--line);border-radius:8px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:#168779;border-radius:8px"></div></div><b style="font-size:12px;text-align:right">'+fmt(x.h)+' h</b></div>';
+  }).join('');
+  const typeValues = [
+    ['Preventiva',d.machines.filter(r=>r.tipo_manutencao==='preventiva').reduce((a,r)=>a+d.hours(r),0),'#168779'],
+    ['Corretiva',d.machines.filter(r=>r.tipo_manutencao==='corretiva').reduce((a,r)=>a+d.hours(r),0),'#d69b35'],
+    ['Não programada',d.machines.filter(r=>r.tipo_manutencao==='nao_programada').reduce((a,r)=>a+d.hours(r),0),'#64748b']
+  ];
+  const typeTotal = typeValues.reduce((a,x)=>a+x[1],0);
+  const typeBar = typeValues.map(x=>'<div title="'+x[0]+': '+fmt(x[1])+' h" style="height:18px;width:'+(typeTotal?x[1]/typeTotal*100:0)+'%;background:'+x[2]+'"></div>').join('');
+  const typeLegend = typeValues.map(x=>'<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;margin:4px 10px 4px 0"><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+x[2]+'"></i>'+x[0]+': <b>'+fmt(x[1])+' h</b></span>').join('');
+  const months = new Map();
+  d.machines.forEach(r=>{
+    const month=(r.data_servico||'').slice(0,7);
+    if(month) months.set(month,(months.get(month)||0)+d.hours(r));
+  });
+  const monthly=[...months.entries()].sort((a,b)=>a[0].localeCompare(b[0])).slice(-12);
+  const monthMax=Math.max(1,...monthly.map(x=>x[1]));
+  const monthBars=monthly.map(x=>{
+    const height=Math.max(3,x[1]/monthMax*100);
+    const label=x[0].slice(5,7)+'/'+x[0].slice(2,4);
+    return '<div style="flex:1;min-width:22px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:128px"><span style="font-size:10px">'+fmt(x[1])+'</span><div title="'+label+': '+fmt(x[1])+' h" style="width:70%;height:'+height+'%;min-height:3px;background:#3978a8;border-radius:4px 4px 0 0"></div><span style="font-size:10px;white-space:nowrap">'+label+'</span></div>';
+  }).join('');
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:14px 0">'+
+    '<section class="panel" style="padding:12px"><h3 style="margin:0 0 10px">Horas por grupo — Top 10</h3>'+(bars||'<div class="empty">Sem dados para o período.</div>')+'</section>'+
+    '<section class="panel" style="padding:12px"><h3 style="margin:0 0 12px">Distribuição por tipo</h3><div style="display:flex;height:18px;border-radius:8px;overflow:hidden;background:var(--line)">'+typeBar+'</div><div style="margin-top:12px">'+typeLegend+'</div><div class="note">Percentuais calculados sobre as horas dos equipamentos.</div></section>'+
+    '<section class="panel" style="padding:12px;grid-column:1/-1"><h3 style="margin:0 0 8px">Evolução mensal de horas</h3><div style="display:flex;align-items:flex-end;gap:8px;overflow-x:auto;padding:8px 2px 2px;min-height:145px">'+(monthBars||'<div class="empty">Sem dados mensais.</div>')+'</div></section></div>';
+}
+
 function reportEquipResultsHTML() {
   const d = reportEquipData(), fmt = v => Number(v || 0).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1});
   const typeHours = type => d.machines.filter(r => r.tipo_manutencao === type).reduce((a,r)=>a+d.hours(r),0);
@@ -2147,6 +2181,7 @@ function reportEquipResultsHTML() {
   const groupRows = d.groups.map(x=>'<tr><td><b>'+esc(x.name)+'</b></td><td class="num">'+x.n+'</td><td class="num"><b>'+fmt(x.h)+'</b></td><td class="num">'+fmt(x.prev)+'</td><td class="num">'+fmt(x.corr)+'</td><td class="num">'+fmt(x.np)+'</td></tr>').join('');
   const equipmentRows = d.equipment.slice(0,30).map(x=>'<tr><td class="mono">'+esc(x.code)+'</td><td>'+esc(x.name)+'</td><td>'+esc(x.group)+'</td><td class="num">'+x.n+'</td><td class="num"><b>'+fmt(x.h)+'</b></td></tr>').join('');
   return '<div class="kpis">'+kpis.map(x=>'<div class="kpi"><b>'+x[1]+'</b><span>'+x[0]+'</span></div>').join('')+'</div>'+
+    reportEquipChartsHTML(d)+
     '<div class="sub" style="padding:8px 0"><b>Horas por tipo (equipamentos)</b><span>Preventiva: <b>'+fmt(typeHours('preventiva'))+' h</b></span><span>Corretiva: <b>'+fmt(typeHours('corretiva'))+' h</b></span><span>Não programada: <b>'+fmt(typeHours('nao_programada'))+' h</b></span></div>'+
     '<h3 style="margin:12px 0 6px">Grupos de equipamentos — ordem decrescente de horas</h3>'+
     '<div style="overflow-x:auto"><table><thead><tr><th>Grupo</th><th class="num">Registros</th><th class="num">Total (h)</th><th class="num">Preventiva (h)</th><th class="num">Corretiva (h)</th><th class="num">Não programada (h)</th></tr></thead><tbody>'+
