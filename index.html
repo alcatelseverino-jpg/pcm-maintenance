@@ -2191,6 +2191,30 @@ function reportEquipResultsHTML() {
     (equipmentRows || '<tr><td colspan="5" class="empty">Nenhum equipamento encontrado.</td></tr>')+'</tbody></table></div>'+
     '<div class="note">Mão de Obra/serviços é apresentada separadamente e não entra no ranking de máquinas. As horas seguem a mesma regra do painel atual: diferença entre hora de início e fim dos registros, sem somar novamente o tempo das OS. Registros sem OS não são automaticamente classificados como não programados; prevalece o tipo gravado no registro.</div>';
 }
+
+function printEquipReport() {
+  const result = $('#dlgBody .report-result');
+  if (!result) throw new Error('Abra o relatório antes de imprimir.');
+  const f = reportEquipFilters();
+  const val = id => $('#'+id)?.selectedOptions?.[0]?.textContent || '';
+  const filtros = [
+    'Período: '+(f.de ? new Date(f.de+'T12:00:00').toLocaleDateString('pt-BR') : 'início')+' a '+(f.ate ? new Date(f.ate+'T12:00:00').toLocaleDateString('pt-BR') : 'hoje'),
+    'Tipo: '+val('erTipo'), 'Grupo: '+(f.grupo ? val('erGrupo') : 'Todos os grupos'),
+    'Equipamento: '+(f.equipamento ? val('erEquip') : 'Todos os equipamentos'),
+    'Situação: '+val('erSituacao')
+  ];
+  const w = window.open('', '_blank');
+  if (!w) throw new Error('O navegador bloqueou a janela de impressão. Permita pop-ups para este sistema e tente novamente.');
+  const report = result.innerHTML;
+  const html = '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de produtividade por grupo</title><style>'+
+    '@page{size:A4 landscape;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#18212b;margin:0;font-size:10px;--line:#d9e0e6;--muted:#65717d}'+
+    'h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;margin:14px 0 7px}h3{font-size:13px;margin:10px 0 7px}.head{border-bottom:2px solid #168779;padding-bottom:9px;margin-bottom:12px}.brand{font-size:9px;letter-spacing:1.2px;color:#168779;font-weight:bold;margin-bottom:5px}.meta{font-size:9px;color:#53606c;margin-top:5px;line-height:1.5}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}.kpi,.panel{border:1px solid #d9e0e6;border-radius:5px;padding:9px;background:#fff}.kpi b{display:block;font-size:17px}.kpi span{font-size:9px;color:#65717d}.report-equip{width:100%}.panel{break-inside:avoid}.report-equip table{width:100%;border-collapse:collapse;font-size:9px;margin:5px 0 12px}.report-equip th,.report-equip td{border:1px solid #d9e0e6;padding:5px 6px;text-align:left}.report-equip th{background:#edf2f5;font-weight:bold}.report-equip .num{text-align:right;font-variant-numeric:tabular-nums}.report-equip .note{font-size:8px;color:#53606c;margin-top:8px;line-height:1.45}.report-equip .sub{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0}.report-equip .empty{padding:10px;color:#65717d}.report-equip [style*=overflow-x]{overflow:visible!important}.report-equip h3{break-after:avoid}.report-equip tr{break-inside:avoid}.report-equip .kpis{grid-template-columns:repeat(4,1fr)}.report-equip [style*=grid-template-columns]{break-inside:avoid}.report-equip [style*=background]{print-color-adjust:exact;-webkit-print-color-adjust:exact}.foot{border-top:1px solid #d9e0e6;margin-top:14px;padding-top:6px;color:#65717d;font-size:8px}@media print{.no-print{display:none!important}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}'+
+    '</style></head><body><header class="head"><div class="brand">GESTORPCM · RELATÓRIO GERENCIAL</div><h1>Produtividade por grupo e equipamento</h1><div class="meta">'+filtros.map(esc).join(' &nbsp; | &nbsp; ')+'<br>Emitido em '+new Date().toLocaleString('pt-BR')+'</div></header>'+
+    report+'<footer class="foot">Relatório gerado pelo GestorPCM · Horas calculadas pela diferença entre hora de início e hora de fim dos registros de manutenção.</footer>'+
+    '<script>window.addEventListener("load",function(){setTimeout(function(){window.print()},350)});<\/script></body></html>';
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
 function openEquipReport() {
   const f = reportEquipFilters();
   const groupOptions = '<option value="">Todos os grupos</option>' + S.grupos.map(g=>'<option value="'+esc(g.id)+'"'+(f.grupo===g.id?' selected':'')+'>'+esc(g.nome)+'</option>').join('');
@@ -2203,7 +2227,7 @@ function openEquipReport() {
     '<label>Equipamento <select id="erEquip" data-er-filter="equipamento">'+equipOptions()+'</select></label>'+
     '<label>Situação da OS <select id="erSituacao" data-er-filter="situacao"><option value="todos">Todas</option><option value="sem_os"'+(f.situacao==='sem_os'?' selected':'')+'>Sem OS vinculada</option><option value="aberta"'+(f.situacao==='aberta'?' selected':'')+'>Aberta</option><option value="em_execucao"'+(f.situacao==='em_execucao'?' selected':'')+'>Em execução</option><option value="concluida"'+(f.situacao==='concluida'?' selected':'')+'>Concluída</option></select></label></div>'+
     '<div class="report-result">'+reportEquipResultsHTML()+'</div></div>';
-  openModal({title:'Relatório de produtividade por grupo e equipamento',body,wide:true,actions:[{label:'⬇ Exportar grupos (CSV)',cls:'primary',run:()=>{
+  openModal({title:'Relatório de produtividade por grupo e equipamento',body,wide:true,actions:[{label:'🖨 Imprimir / Salvar PDF',cls:'primary',run:printEquipReport},{label:'⬇ Exportar grupos (CSV)',run:()=>{
     const d=reportEquipData();
     downloadCsv(['Grupo','Registros','Horas totais','Horas preventivas','Horas corretivas','Horas não programadas'],
       d.groups.map(x=>[x.name,x.n,Math.round(x.h*100)/100,Math.round(x.prev*100)/100,Math.round(x.corr*100)/100,Math.round(x.np*100)/100]),
