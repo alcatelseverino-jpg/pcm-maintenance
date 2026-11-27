@@ -363,7 +363,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
           </div>
           <div class="kpis" id="pKpis"></div>
           <table>
-            <thead><tr><th>Técnico</th><th class="num" title="OS concluídas no período (pela data de conclusão)">OS conc.</th><th class="num" title="Registros de manutenção lançados no período (com ou sem OS)">Regist.</th><th class="num">Horas</th><th class="num" title="Horas dos registros do tipo preventiva">Horas prev.</th><th class="num" title="Horas dos registros do tipo corretiva">Horas corr.</th><th class="num" title="CLT: dias em que a equipe CLT registrou; MEI: desde o 1º registro dele no período. 8 h seg–sex, 4 h sábado, domingo 0">Horas disp.</th><th class="num" title="Horas registradas ÷ horas disponíveis">Produtividade %</th><th></th></tr></thead>
+            <thead><tr><th>Técnico</th><th class="num" title="OS concluídas no período (pela data de conclusão)">OS conc.</th><th class="num" title="Registros de manutenção lançados no período (com ou sem OS)">Regist.</th><th class="num">Horas</th><th class="num" title="Horas dos registros do tipo preventiva">Horas prev.</th><th class="num" title="Horas dos registros do tipo corretiva">Horas corr.</th><th class="num" title="Horas dos registros do tipo não programada">Horas n.prog.</th><th class="num" title="CLT: dias em que a equipe CLT registrou; MEI: desde o 1º registro dele no período. 8 h seg–sex, 4 h sábado, domingo 0">Horas disp.</th><th class="num" title="Horas registradas ÷ horas disponíveis">Produtividade %</th><th></th></tr></thead>
             <tbody id="pBody"></tbody>
           </table>
           <div class="note">Horas = soma de (hora fim − hora início) dos registros de manutenção no período; horas preventivas/corretivas seguem o tipo do registro. OS concluídas = pela data de conclusão. “Em aberto agora” não depende do período.</div>
@@ -426,6 +426,7 @@ const L = {
   os:   {aberta: 'Aberta', em_execucao: 'Em execução', concluida: 'Concluída'},
   prio: {baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente: 'Urgente'},
   tipo: {preventiva: 'Preventiva', corretiva: 'Corretiva', checklist: 'Checklist'},
+  regTipo: {preventiva: 'Preventiva', corretiva: 'Corretiva', nao_programada: 'Não programada'},   // tipo do registro de manutenção
   eq:   {operando: 'Operando', em_manutencao: 'Em manutenção', parado_com_defeito: 'Parado com defeito', desativado: 'Desativado'},
   crit: {baixa: 'Baixa', media: 'Média', alta: 'Alta'},
   cal:  {atrasado: 'Vencido', proximo: 'Próximo a vencer', ok: 'Em dia'},
@@ -789,10 +790,10 @@ function gPar() {
   const {de, ate} = {de: S.g.de.par, ate: S.g.ate.par};
   const m = new Map(); const get = id => { if (!m.has(id)) m.set(id, {falhas: 0, min: 0, abertas: 0}); return m.get(id); };
   S.os.filter(o => o.tipo === 'corretiva' && inRange(o.data_abertura, de, ate) && gOkEq(o.equipamento_id)).forEach(o => { const g = get(o.equipamento_id); g.falhas++; if (o.status !== 'concluida') g.abertas++; });
-  S.regs.filter(r => r.tipo_manutencao === 'corretiva' && r.data_servico && r.data_servico >= de && r.data_servico <= ate && gOkEq(r.equipamento_id)).forEach(r => { get(r.equipamento_id).min += minutesBetween(r.hora_inicio, r.hora_fim); });
+  S.regs.filter(r => r.tipo_manutencao !== 'preventiva' && r.data_servico && r.data_servico >= de && r.data_servico <= ate && gOkEq(r.equipamento_id)).forEach(r => { get(r.equipamento_id).min += minutesBetween(r.hora_inicio, r.hora_fim); });
   const list = [...m.entries()].sort((a, b) => b[1].min - a[1].min || b[1].falhas - a[1].falhas).slice(0, 20);
   return `<div class="sub" style="padding-left:0"><label>Grupo <select data-gf="grupo">${gGrpOpts()}</select></label>${gDates()}</div>` +
-    '<table><thead><tr><th>Equipamento</th><th>Grupo</th><th class="num">OS corretivas</th><th class="num">Abertas agora</th><th class="num">Horas de corretiva</th></tr></thead><tbody>' +
+    '<table><thead><tr><th>Equipamento</th><th>Grupo</th><th class="num">OS corretivas</th><th class="num">Abertas agora</th><th class="num" title="Registros do tipo corretiva + não programada">Horas de corretiva</th></tr></thead><tbody>' +
     (list.map(([id, v]) => { const e = S.eqById.get(id); return `<tr style="cursor:default"><td><b class="mono">${esc(e?.codigo || '')}</b> <span class="muted">${esc(e?.nome || '')}</span></td><td>${esc(S.grpById.get(e?.grupo_id)?.nome || '—')}</td><td class="num">${v.falhas}</td><td class="num">${v.abertas}</td><td class="num"><b>${nf1(v.min / 60)}</b></td></tr>`; }).join('')
       || '<tr><td colspan="5" class="empty" style="cursor:default">Sem corretivas no período.</td></tr>') +
     '</tbody></table><div class="note">Top 20 por horas de manutenção corretiva registradas (registros do tipo corretiva) e nº de OS corretivas abertas no período. A criticidade cadastrada ainda não diferencia os equipamentos (quase todos “média”), por isso o ranking usa horas e falhas.</div>';
@@ -830,7 +831,7 @@ function gQual() {
       const e = S.eqById.get(r.equipamento_id);
       const cand = f.includes('sem_os') ? S.os.filter(o => o.equipamento_id === r.equipamento_id && o.status !== 'concluida') : [];
       const act = cand.length ? `<select data-lksel="${r.id}" style="min-width:128px">${cand.map(o => `<option value="${o.id}">${esc(o.numero)} · ${esc(L.tipo[o.tipo] || o.tipo)}</option>`).join('')}</select> <button type="button" class="btn" data-lk="${r.id}">Vincular</button>` : '';
-      return `<tr style="cursor:default"><td class="mono">${fmtDia(r.data_servico).slice(0, 5)} <span class="muted">${dowOf(r.data_servico)}</span></td><td>${esc(S.tecById.get(r.tecnico_id)?.nome || '—')}</td><td class="mono">${esc(e?.codigo || '—')}</td><td>${esc(L.tipo[r.tipo_manutencao] || r.tipo_manutencao || '')}</td><td class="num">${nf1(m / 60)}</td><td class="ell" style="max-width:220px" title="${esc(r.descricao || '')}">${esc(r.descricao || '')}</td><td>${f.map(k => `<span class="badge b-em_execucao">${FLAG_L[k]}</span>`).join(' ')}</td><td class="nox">${act}</td></tr>`;
+      return `<tr style="cursor:default"><td class="mono">${fmtDia(r.data_servico).slice(0, 5)} <span class="muted">${dowOf(r.data_servico)}</span></td><td>${esc(S.tecById.get(r.tecnico_id)?.nome || '—')}</td><td class="mono">${esc(e?.codigo || '—')}</td><td>${esc(L.regTipo[r.tipo_manutencao] || r.tipo_manutencao || '')}</td><td class="num">${nf1(m / 60)}</td><td class="ell" style="max-width:220px" title="${esc(r.descricao || '')}">${esc(r.descricao || '')}</td><td>${f.map(k => `<span class="badge b-em_execucao">${FLAG_L[k]}</span>`).join(' ')}</td><td class="nox">${act}</td></tr>`;
     }).join('') || '<tr><td colspan="8" class="empty" style="cursor:default">Nada a mostrar neste filtro.</td></tr>') +
     `</tbody></table><div class="note">${show.length > 200 ? `Mostrando 200 de ${show.length}. ` : ''}Sinais são avisos, não erros: “sem OS” = registro sem ordem vinculada (conta como corretiva); “dia acima da jornada” = mais de 8 h (seg–sex) ou 4 h (sábado) somadas no dia do técnico. Vincular só oferece OS abertas do mesmo equipamento.</div>`;
 }
@@ -1163,7 +1164,7 @@ function renderRegs() {
   const gmin = r => gt.get(r.grupo ?? '') || 0;
   const grupos = new Set(rows.map(r => r.grupo ?? ''));
   body.innerHTML = rows.map(r => `<tr style="cursor:default"><td class="nw">${fmtD(r.data)}</td><td>${esc(r.tecnico)}</td>
-      <td class="mono" title="${esc(r.equipamento)}">${esc(r.equipamento_codigo)}</td><td title="${esc(L.tipo[r.tipo] || r.tipo)}">${esc({preventiva: 'Prev.', corretiva: 'Corr.', checklist: 'Check.'}[r.tipo] || r.tipo)}</td>
+      <td class="mono" title="${esc(r.equipamento)}">${esc(r.equipamento_codigo)}</td><td title="${esc(L.regTipo[r.tipo] || r.tipo)}">${esc({preventiva: 'Prev.', corretiva: 'Corr.', nao_programada: 'N.prog.', checklist: 'Check.'}[r.tipo] || r.tipo)}</td>
       <td class="desc">${esc(r.descricao)}</td><td class="num nw">${esc(r.tempo)}</td>
       <td class="num nw" title="Grupo: ${esc(r.grupo || 'sem grupo')}">${tempoFmt(gmin(r))}</td></tr>`).join('')
     + `<tr class="tot" style="cursor:default"><td colspan="5">Tempo total da OS</td><td class="num nw">${tempoFmt(rows.reduce((s, r) => s + tempoMin(r.tempo), 0))}</td><td class="num nw">${grupos.size === 1 ? tempoFmt(gmin(rows[0])) : '—'}</td></tr>`;
@@ -1852,7 +1853,7 @@ function revisaFolha(j, itens, fp) {
       <td><input type="date" data-f="data" class="${dv(r, 'data')}" value="${esc(r.data || '')}" max="${hoje}"></td>
       <td><select data-f="tec" class="${dv(r, 'tecnico')}">${optList(tecOpts, r.tecnico_id, '—')}</select></td>
       <td><select data-f="eq" class="${dv(r, 'equipamento')}">${optList(eqOpts, r.equipamento_id, '—')}</select></td>
-      <td><select data-f="tipo" class="${dv(r, 'tipo')}">${optList([['preventiva', 'Preventiva'], ['corretiva', 'Corretiva']], r.tipo, '—')}</select></td>
+      <td><select data-f="tipo" class="${dv(r, 'tipo')}">${optList([['preventiva', 'Preventiva'], ['corretiva', 'Corretiva'], ['nao_programada', 'Não programada']], r.tipo, '—')}</select></td>
       <td><input type="time" data-f="hi" class="${dv(r, 'hora_inicio')}" value="${esc(r.hora_inicio || '')}"></td>
       <td><input type="time" data-f="hf" class="${dv(r, 'hora_fim')}" value="${esc(r.hora_fim || '')}"></td>
       <td><input type="text" data-f="desc" class="${dv(r, 'descricao')}" value="${esc(r.descricao || '')}"></td>
@@ -2091,14 +2092,14 @@ function renderProd() {
   const regs = S.regs.filter(r => r.data_servico && (!p.de || r.data_servico >= p.de) && (!p.ate || r.data_servico <= p.ate) && okEq(r.equipamento_id) && okTec(r.tecnico_id));
   const mins = r => minutesBetween(r.hora_inicio, r.hora_fim);
   const sum = list => list.reduce((s, r) => s + mins(r), 0);
-  const prevRegs = regs.filter(r => r.tipo_manutencao === 'preventiva'), corrRegs = regs.filter(r => r.tipo_manutencao === 'corretiva');
+  const prevRegs = regs.filter(r => r.tipo_manutencao === 'preventiva'), corrRegs = regs.filter(r => r.tipo_manutencao === 'corretiva'), npRegs = regs.filter(r => r.tipo_manutencao === 'nao_programada');
   $('#pKpis').innerHTML = [
     [done.length, 'OS concluídas'], [regs.length, 'Registros de manutenção'], [nf1(sum(regs) / 60), 'Horas registradas'],
-    [nf1(sum(prevRegs) / 60), 'Horas preventivas'], [nf1(sum(corrRegs) / 60), 'Horas corretivas'],
+    [nf1(sum(prevRegs) / 60), 'Horas preventivas'], [nf1(sum(corrRegs) / 60), 'Horas corretivas'], [nf1(sum(npRegs) / 60), 'Horas não programadas'],
     [opened.length, 'OS abertas no período'], [backlog.length, 'Em aberto agora']
   ].map(([v, t]) => `<div class="kpi"><b>${v}</b><span>${t}</span></div>`).join('');
   const by = new Map();
-  const get = id => { if (!by.has(id)) by.set(id, {n: 0, regs: 0, min: 0, prev: 0, corr: 0}); return by.get(id); };
+  const get = id => { if (!by.has(id)) by.set(id, {n: 0, regs: 0, min: 0, prev: 0, corr: 0, np: 0}); return by.get(id); };
   done.forEach(o => { get(o.tecnico_id).n++; });
   // horas disponíveis (seg–sex 8 h, sáb 4 h, domingo 0):
   //  CLT: dias em que a equipe CLT trabalhou (dia sem registro de nenhum CLT = feriado/parada); faltou → produtividade cai
@@ -2125,14 +2126,14 @@ function renderProd() {
     dias.forEach(d => { if (d >= ini && d <= fim && !feriados.has(d) && !emAus(id, d)) m += minDia(d); });
     return m;
   };
-  regs.forEach(r => { const g = get(r.tecnico_id), m = mins(r); g.regs++; g.min += m; if (r.tipo_manutencao === 'preventiva') g.prev += m; else if (r.tipo_manutencao === 'corretiva') g.corr += m; });
+  regs.forEach(r => { const g = get(r.tecnico_id), m = mins(r); g.regs++; g.min += m; if (r.tipo_manutencao === 'preventiva') g.prev += m; else if (r.tipo_manutencao === 'corretiva') g.corr += m; else if (r.tipo_manutencao === 'nao_programada') g.np += m; });
   const rows = [...by.entries()].sort((a, b) => b[1].min - a[1].min || b[1].n - a[1].n);
-  $('#pBody').innerHTML = rows.map(([id, r]) => `<tr style="cursor:default"><td>${esc(S.tecById.get(id)?.nome || '—')}</td><td class="num">${r.n}</td><td class="num">${r.regs}</td><td class="num">${nf1(r.min / 60)}</td><td class="num">${nf1(r.prev / 60)}</td><td class="num">${nf1(r.corr / 60)}</td>${(() => { const d = dispMin(id), pc = d ? Math.round(100 * r.min / d) : null; return `<td class="num">${nf1(d / 60)}</td><td class="num"><b>${pc == null ? '—' : pc + '%'}</b></td><td style="width:60px"><div class="bar"><i style="width:${Math.min(100, pc || 0)}%"></i></div></td>`; })()}</tr>`).join('')
-    || '<tr><td colspan="9" class="empty" style="cursor:default">Sem atividade no período/filtros.</td></tr>';
+  $('#pBody').innerHTML = rows.map(([id, r]) => `<tr style="cursor:default"><td>${esc(S.tecById.get(id)?.nome || '—')}</td><td class="num">${r.n}</td><td class="num">${r.regs}</td><td class="num">${nf1(r.min / 60)}</td><td class="num">${nf1(r.prev / 60)}</td><td class="num">${nf1(r.corr / 60)}</td><td class="num">${nf1(r.np / 60)}</td>${(() => { const d = dispMin(id), pc = d ? Math.round(100 * r.min / d) : null; return `<td class="num">${nf1(d / 60)}</td><td class="num"><b>${pc == null ? '—' : pc + '%'}</b></td><td style="width:60px"><div class="bar"><i style="width:${Math.min(100, pc || 0)}%"></i></div></td>`; })()}</tr>`).join('')
+    || '<tr><td colspan="10" class="empty" style="cursor:default">Sem atividade no período/filtros.</td></tr>';
   if (rows.length) {   // linha final: total geral (todos os técnicos listados)
-    const T = rows.reduce((t, [id, r]) => ({n: t.n + r.n, regs: t.regs + r.regs, min: t.min + r.min, prev: t.prev + r.prev, corr: t.corr + r.corr, disp: t.disp + dispMin(id)}), {n: 0, regs: 0, min: 0, prev: 0, corr: 0, disp: 0});
+    const T = rows.reduce((t, [id, r]) => ({n: t.n + r.n, regs: t.regs + r.regs, min: t.min + r.min, prev: t.prev + r.prev, corr: t.corr + r.corr, np: t.np + r.np, disp: t.disp + dispMin(id)}), {n: 0, regs: 0, min: 0, prev: 0, corr: 0, np: 0, disp: 0});
     const pc = T.disp ? Math.round(100 * T.min / T.disp) : null;
-    $('#pBody').insertAdjacentHTML('beforeend', `<tr class="tot" style="cursor:default"><td><b>TOTAL GRANALHA</b></td><td class="num"><b>${T.n}</b></td><td class="num"><b>${T.regs}</b></td><td class="num"><b>${nf1(T.min / 60)}</b></td><td class="num"><b>${nf1(T.prev / 60)}</b></td><td class="num"><b>${nf1(T.corr / 60)}</b></td><td class="num"><b>${nf1(T.disp / 60)}</b></td><td class="num"><b>${pc == null ? '—' : pc + '%'}</b></td><td></td></tr>`);
+    $('#pBody').insertAdjacentHTML('beforeend', `<tr class="tot" style="cursor:default"><td><b>TOTAL GRANALHA</b></td><td class="num"><b>${T.n}</b></td><td class="num"><b>${T.regs}</b></td><td class="num"><b>${nf1(T.min / 60)}</b></td><td class="num"><b>${nf1(T.prev / 60)}</b></td><td class="num"><b>${nf1(T.corr / 60)}</b></td><td class="num"><b>${nf1(T.np / 60)}</b></td><td class="num"><b>${nf1(T.disp / 60)}</b></td><td class="num"><b>${pc == null ? '—' : pc + '%'}</b></td><td></td></tr>`);
   }
   const semOs = regs.filter(r => !r.ordem_servico_id).length;
   $('#pNote').textContent = regs.length
@@ -2278,7 +2279,7 @@ function renderExport() {
       fld('Técnico', sel('reg.tec', S.tecnicos.map(t => [t.nome, t.nome]), 'Todos')) +
       fld('Grupo de equipamentos', sel('reg.grupo', grpOpts, 'Todos')) +
       fld('Equipamento (código)', inp('reg.eq', 'text', 'list="dlEq" placeholder="Todos"') + equipDatalist()) +
-      fld('Tipo de manutenção', sel('reg.tipo', Object.entries(L.tipo), 'Todos')) +
+      fld('Tipo de manutenção', sel('reg.tipo', Object.entries(L.regTipo), 'Todos')) +
       fld('Vínculo com OS', sel('reg.vinc', [['com', 'Somente com OS'], ['sem', 'Somente sem OS']], 'Todos')) +
       fld('Ordenar por', sel('reg.ord', [['data', 'Data'], ['tecnico', 'Técnico'], ['equipamento', 'Equipamento'], ['grupo', 'Grupo']])) +
       fld('Buscar no texto', inp('reg.q', 'search', 'placeholder="Descrição, equipamento ou nº da OS"'), {full: true});
@@ -2307,7 +2308,7 @@ async function exDownload() {
   if (s.tab === 'reg') {
     const r = exRegRows(); if (!r.length) throw new Error('Nenhum registro neste filtro.');
     downloadCsv(['Data', 'Dia', 'Início', 'Fim', 'Tempo', 'Horas (decimal)', 'Técnico', 'Cód. equipamento', 'Equipamento', 'Grupo', 'OS', 'Tipo', 'Descrição'],
-      r.map(x => [fmtDia(x.data), dowOf(x.data), x.inicio || '', x.fim || '', x.tempo || '', hDec(tempoMin(x.tempo)), x.tecnico, x.equipamento_codigo, x.equipamento, x.grupo || '', x.ordem_servico || '', L.tipo[x.tipo] || x.tipo, x.descricao]),
+      r.map(x => [fmtDia(x.data), dowOf(x.data), x.inicio || '', x.fim || '', x.tempo || '', hDec(tempoMin(x.tempo)), x.tecnico, x.equipamento_codigo, x.equipamento, x.grupo || '', x.ordem_servico || '', L.regTipo[x.tipo] || x.tipo, x.descricao]),
       `registros_manutencao_${s.reg.de || 'inicio'}_a_${s.reg.ate || hoje}.csv`);
   } else {
     const r = exOsRows(); if (!r.length) throw new Error('Nenhuma OS neste filtro.');
