@@ -206,6 +206,12 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
 .ncitem .h{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
 .ncitem .ac{display:flex;gap:8px;margin-top:8px}
 .ncn{display:inline-block;min-width:18px;border-radius:999px;background:var(--red);color:#fff;font-size:11px;padding:0 6px;margin-left:4px}
+.audn{display:inline-block;min-width:18px;border-radius:999px;background:#64748b;color:#fff;font-size:11px;padding:0 6px;margin-left:4px}
+.btn.aud-ok{color:#475569}
+.btn.aud-warn{background:#fef3c7;border-color:#f59e0b;color:#92400e}.btn.aud-warn .audn{background:#d97706}
+.btn.aud-err{background:#fee2e2;border-color:var(--red);color:#991b1b;animation:audp 1.6s ease-in-out infinite}.btn.aud-err .audn{background:var(--red)}
+@keyframes audp{50%{box-shadow:0 0 0 3px rgba(220,38,38,.28)}}
+@media (prefers-reduced-motion:reduce){.btn.aud-err{animation:none}}
 </style>
 </head>
 <body>
@@ -237,6 +243,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
     <button class="btn" id="btnFolhasPapel" type="button" title="Gerar e controlar as folhas de registro numeradas">📄 Folhas</button>
     <button class="btn" id="btnFolha" type="button" title="Fotografar a folha de registro e ler as linhas">📷 Ler folha por foto</button>
     <button class="btn" id="btnNC" type="button" title="Itens do checklist marcados como Não OK">⚠ Não conformidades<span class="ncn" id="ncN" hidden></span></button>
+    <button class="btn aud aud-ok" id="btnAud" type="button" hidden title="Auditoria dos registros e das OS">🔎 Auditoria<span class="audn" id="audN" hidden></span></button>
     <button class="btn" id="btnCfgPdf" type="button" title="Tamanho e posição da impressão da OS">⚙ Impressão</button>
     <button class="btn" id="btnReload" type="button">↻ Atualizar</button>
     <button class="btn" id="btnOut" type="button">Sair</button>
@@ -641,6 +648,7 @@ async function loadAll() {
     S.feriados = fers; S.ausencias = auss;
     await carregaCfgPdf();
     await carregaCfgTempo();
+    await loadAuditoria();
     S.planoById = new Map(planos.map(p => [p.id, p]));
     S.edGrupos = S.admin
       ? (edg.data || [])
@@ -1121,6 +1129,104 @@ function openNC() {
 $('#btnNC').addEventListener('click', openNC);
 $('#btnFolha').addEventListener('click', openFolha);
 $('#btnFolhasPapel').addEventListener('click', openFolhasPapel);
+
+/* ---- 🔎 Auditoria (só admin): achados da view vw_auditoria. O botão muda de cor: cinza = nada, amarelo = avisos, vermelho = erros ---- */
+const AUD_CFG = {reg_h: 10, tec_h: 24, os_h: 0};
+const AUD_CFG_CHAVES = {reg_h: 'aud_registro_max_horas', tec_h: 'aud_tecnico_dia_max_horas', os_h: 'aud_os_fechada_max_horas'};
+async function loadAuditoria() {
+  S.aud = [];
+  if (S.admin) {
+    try {
+      const {data, error} = await sb.from('vw_auditoria').select('*').limit(3000);
+      if (error) throw error;
+      S.aud = data || [];
+      const c = await sb.from('app_config_os').select('chave,valor').in('chave', Object.values(AUD_CFG_CHAVES));
+      for (const [k, ch] of Object.entries(AUD_CFG_CHAVES)) {
+        const r = (c.data || []).find(x => x.chave === ch), n = r ? Number(String(r.valor).replace(',', '.')) : NaN;
+        if (Number.isFinite(n)) AUD_CFG[k] = n;
+      }
+    } catch (_) { S.aud = []; }   // se a view faltar, a auditoria só fica vazia
+  }
+  atualizaBtnAud();
+}
+function atualizaBtnAud() {
+  const b = $('#btnAud'); if (!b) return;
+  const nE = S.aud.filter(a => a.gravidade === 'erro').length, nA = S.aud.length - nE;
+  b.hidden = !S.admin;
+  b.className = 'btn aud ' + (nE ? 'aud-err' : nA ? 'aud-warn' : 'aud-ok');
+  const n = $('#audN'); n.textContent = S.aud.length; n.hidden = !S.aud.length;
+  b.title = S.aud.length ? `${nE} erro(s) e ${nA} aviso(s) para verificar` : 'Auditoria: nenhum achado';
+}
+function openAud() {
+  if (!S.admin) return;
+  const grp = new Map();
+  S.aud.forEach(a => { if (!grp.has(a.regra)) grp.set(a.regra, {regra: a.regra, titulo: a.titulo, gravidade: a.gravidade, itens: []}); grp.get(a.regra).itens.push(a); });
+  const regras = [...grp.values()].sort((a, b) => (a.gravidade === 'erro' ? 0 : 1) - (b.gravidade === 'erro' ? 0 : 1) || b.itens.length - a.itens.length);
+  if (!grp.has(S.audSel)) S.audSel = regras[0]?.regra || null;
+  const sel = grp.get(S.audSel), dt = s => s ? String(s).split('-').reverse().join('/') : '—';
+  const campo = (k, rot, dica) => `<label style="display:inline-block;margin:0 22px 8px 0"><b>${rot}</b>
+    <input id="acfg_${k}" type="number" step="any" min="0" value="${AUD_CFG[k]}" style="width:80px;margin-left:6px"><span class="muted" style="font-size:12px;margin-left:6px">${dica}</span></label>`;
+  const chips = regras.map(r => `<button type="button" class="btn${r.regra === S.audSel ? ' pri' : ''}" data-audr="${esc(r.regra)}" style="margin:0 6px 6px 0">${r.gravidade === 'erro' ? '🔴' : '🟡'} ${esc(r.titulo)} <b>${r.itens.length}</b></button>`).join('');
+  const linhas = !sel ? '' : sel.itens.slice().sort((a, b) => String(b.data_ref).localeCompare(String(a.data_ref))).map(a => `<tr>
+    <td>${esc(a.numero_os || '—')}</td><td>${esc(a.equipamento_codigo || '—')}</td><td>${esc(a.tecnico_nome || '—')}</td><td>${dt(a.data_ref)}</td>
+    <td style="white-space:normal;min-width:240px">${esc(a.detalhe || '')}</td>
+    <td style="white-space:nowrap">${a.ordem_servico_id ? `<button type="button" class="btn" data-audos="${esc(a.ordem_servico_id)}">Abrir OS</button> ` : ''}${a.regra === 'sem_horas' ? `<button type="button" class="btn" data-audaj="${esc(a.ordem_servico_id)}" title="Cria um registro de 1 minuto marcado como ajuste de auditoria">+1 min</button> ` : ''}<button type="button" class="btn" data-audrev="${esc(a.ref)}" data-audreg="${esc(a.regra)}" title="Marca como visto e tira da lista">Revisado</button></td></tr>`).join('');
+  const semH = grp.get('sem_horas')?.itens.length || 0;
+  openModal({
+    title: '🔎 Auditoria', xl: true, closeLabel: 'Fechar',
+    body: `<div class="full">
+      <p class="muted" style="margin-top:0">${S.aud.length ? 'Escolha uma verificação para ver os itens. <b>Revisado</b> tira o item da lista e do alerta do botão (o item não volta). <b>+1 min</b> cria um registro de 1 minuto marcado como ajuste de auditoria; esses ajustes não entram no cálculo do tempo estimado.' : '<b>Nenhum achado.</b> Tudo certo por enquanto.'}</p>
+      <div>${campo('reg_h', 'Registro longo acima de (h)', '')}${campo('tec_h', 'Técnico por dia acima de (h)', '')}${campo('os_h', 'OS demorada acima de (h)', '0 = desligado')}</div>
+      <div style="margin:6px 0 4px">${chips}</div>
+      ${sel ? `<div style="overflow:auto;max-height:46vh;margin-top:6px"><table><thead><tr><th>OS</th><th>Equipamento</th><th>Técnico</th><th>Data</th><th>Detalhe</th><th></th></tr></thead><tbody>${linhas}</tbody></table></div>` : ''}
+    </div>`,
+    actions: [
+      {label: 'Salvar limites', run: async () => {
+        const novo = {};
+        for (const k of Object.keys(AUD_CFG_CHAVES)) {
+          const v = Number($('#acfg_' + k).value);
+          if (!Number.isFinite(v) || v < 0 || v > 720) throw new Error('Limites: use horas entre 0 e 720.');
+          novo[k] = v;
+        }
+        for (const [k, ch] of Object.entries(AUD_CFG_CHAVES)) {
+          if (novo[k] === AUD_CFG[k]) continue;
+          const {data, error} = await sb.from('app_config_os').update({valor: String(novo[k]), atualizado_em: new Date().toISOString()}).eq('chave', ch).select('chave');
+          if (error) throw error;
+          if (!data?.length) throw new Error('Não foi possível gravar o limite (sem permissão).');
+        }
+        await loadAuditoria(); openAud(); toast('Limites salvos.', 'good');
+      }},
+      ...(semH ? [{label: `Ajustar as ${semH} OS sem horas (+1 min)`, cls: 'pri',
+        confirm: `Vai criar ${semH} registros de 1 minuto, marcados como ajuste de auditoria. Confirma?`, confirmLabel: 'Confirmar ajuste', run: async () => {
+          let ok = 0; const falhas = [];
+          for (const a of grp.get('sem_horas').itens) {
+            const {error} = await sb.rpc('fn_auditoria_ajustar_sem_horas', {p_os_id: a.ordem_servico_id});
+            if (error) falhas.push((a.numero_os || '') + ': ' + error.message); else ok++;
+          }
+          await loadAll(); openAud();
+          toast(`${ok} OS ajustada(s)` + (falhas.length ? `; ${falhas.length} com erro.` : '.'), falhas.length ? '' : 'good');
+          if (falhas.length) showErr(new Error(falhas.slice(0, 5).join(' | ')));
+        }}] : [])
+    ]
+  });
+}
+$('#btnAud').addEventListener('click', openAud);
+$('#dlgBody').addEventListener('click', async e => {
+  const t = e.target.closest('[data-audr],[data-audos],[data-audaj],[data-audrev]'); if (!t) return;
+  try {
+    if (t.dataset.audr) { S.audSel = t.dataset.audr; openAud(); }
+    else if (t.dataset.audos) { closeModal(); await openOS(t.dataset.audos); }
+    else if (t.dataset.audaj) {
+      t.disabled = true;
+      const {error} = await sb.rpc('fn_auditoria_ajustar_sem_horas', {p_os_id: t.dataset.audaj}); if (error) throw error;
+      await loadAll(); openAud(); toast('Ajuste de 1 minuto criado.', 'good');
+    } else if (t.dataset.audrev) {
+      t.disabled = true;
+      const {error} = await sb.from('auditoria_revisada').insert({regra: t.dataset.audreg, ref: t.dataset.audrev}); if (error) throw error;
+      await loadAuditoria(); openAud();
+    }
+  } catch (err) { t.disabled = false; showErr(err); }
+});
 
 /* ---- configuração da impressão da OS ---- */
 function openCfgPdf() {
