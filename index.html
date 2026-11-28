@@ -2176,11 +2176,14 @@ function reportEquipChartsHTML(d) {
   const typeValues = [
     ['Preventiva',d.machines.filter(r=>r.tipo_manutencao==='preventiva').reduce((a,r)=>a+d.hours(r),0),'#168779'],
     ['Corretiva',d.machines.filter(r=>r.tipo_manutencao==='corretiva').reduce((a,r)=>a+d.hours(r),0),'#d69b35'],
-    ['Não programada',d.machines.filter(r=>r.tipo_manutencao==='nao_programada').reduce((a,r)=>a+d.hours(r),0),'#64748b']
+    ['Não programada',d.machines.filter(r=>r.tipo_manutencao==='nao_programada').reduce((a,r)=>a+d.hours(r),0),'#dc2626']
   ];
   const typeTotal = typeValues.reduce((a,x)=>a+x[1],0);
-  const typeBar = typeValues.map(x=>'<div title="'+x[0]+': '+fmt(x[1])+' h" style="height:18px;width:'+(typeTotal?x[1]/typeTotal*100:0)+'%;background:'+x[2]+'"></div>').join('');
-  const typeLegend = typeValues.map(x=>'<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;margin:4px 10px 4px 0"><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+x[2]+'"></i>'+x[0]+': <b>'+fmt(x[1])+' h</b></span>').join('');
+  const typePct = x => typeTotal ? x[1]/typeTotal*100 : 0;
+  const typePeriod = (v, fallback) => v ? new Date(v+'T12:00:00').toLocaleDateString('pt-BR') : fallback;
+  const periodLabel = 'Período: '+typePeriod(reportEquipFilters().de,'início')+' a '+typePeriod(reportEquipFilters().ate,'hoje');
+  const typeBar = typeValues.map(x=>'<div title="'+x[0]+': '+fmt(x[1])+' h ('+typePct(x).toLocaleString('pt-BR',{maximumFractionDigits:1})+'%)" style="height:18px;width:'+typePct(x)+'%;background:'+x[2]+'"></div>').join('');
+  const typeLegend = typeValues.map(x=>'<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;margin:4px 10px 4px 0;color:'+(x[0]==='Não programada'?'#dc2626':'inherit')+'"><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+x[2]+'"></i>'+x[0]+': <b>'+fmt(x[1])+' h · '+typePct(x).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%</b></span>').join('');
   const months = new Map();
   d.machines.forEach(r=>{
     const month=(r.data_servico||'').slice(0,7);
@@ -2202,7 +2205,7 @@ function reportEquipChartsHTML(d) {
   const globalBars=globalMonthly.map(x=>'<div style="flex:1;min-width:22px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:128px"><span style="font-size:10px">'+fmt(x[1])+'</span><div style="width:70%;height:'+Math.max(3,x[1]/globalMax*100)+'%;min-height:3px;background:#168779;border-radius:4px 4px 0 0"></div><span style="font-size:10px;white-space:nowrap">'+x[0].slice(5,7)+'/'+x[0].slice(2,4)+'</span></div>').join('');
   return globalProd+'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:14px 0">'+
     '<section class="panel" style="padding:12px"><h3 style="margin:0 0 10px">Horas por grupo — Top 10</h3>'+(bars||'<div class="empty">Sem dados para o período.</div>')+'</section>'+
-    '<section class="panel" style="padding:12px"><h3 style="margin:0 0 12px">Distribuição por tipo</h3><div style="display:flex;height:18px;border-radius:8px;overflow:hidden;background:var(--line)">'+typeBar+'</div><div style="margin-top:12px">'+typeLegend+'</div><div class="note">Percentuais calculados sobre as horas dos equipamentos.</div></section>'+
+    '<section class="panel" style="padding:12px"><h3 style="margin:0 0 3px">Distribuição por tipo</h3><div class="note" style="margin:0 0 10px">'+esc(periodLabel)+'</div><div style="display:flex;height:18px;border-radius:8px;overflow:hidden;background:var(--line)">'+typeBar+'</div><div style="margin-top:12px">'+typeLegend+'</div><div class="note">Percentuais calculados sobre as horas dos equipamentos no período selecionado.</div></section>'+
     '<section class="panel" style="padding:12px;grid-column:1/-1"><h3 style="margin:0 0 8px">Evolução mensal de horas — consolidado global</h3><div style="display:flex;align-items:flex-end;gap:8px;overflow-x:auto;padding:8px 2px 2px;min-height:145px">'+(globalBars||'<div class="empty">Sem dados mensais.</div>')+'</div></section></div>';
 }
 
