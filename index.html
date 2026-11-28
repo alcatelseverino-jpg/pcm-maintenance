@@ -302,6 +302,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
           <span><i class="lg lg-atrasado"></i>Vencido <b id="cntA">0</b></span>
           <span><i class="lg lg-proximo"></i>Próximo a vencer <b id="cntP">0</b></span>
           <span><i class="lg lg-ok"></i>Em dia <b id="cntO">0</b></span>
+          <button class="btn" id="btnTempos" type="button" hidden title="Margem de segurança, capacidade para preventiva e tempos manuais por grupo">⏱ Tempos</button>
         </div>
       </div>
       <div class="sub">
@@ -325,7 +326,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
         </div>
         <div class="dow"><div>Dom</div><div>Seg</div><div>Ter</div><div>Qua</div><div>Qui</div><div>Sex</div><div>Sáb</div></div>
         <div class="days" id="calDays"></div>
-        <div class="muted" style="font-size:11px;margin-top:4px">⏱ = horas de preventiva estimadas pelo histórico de cada grupo (com margem de segurança) · barra verde/amarela/vermelha = carga até 70% / 70–100% / acima da capacidade da equipe no dia</div>
+        <div class="muted" style="font-size:11px;margin-top:4px">⏱ = horas de preventiva estimadas pelo histórico de cada grupo (com margem de segurança) · barra verde/amarela/vermelha = carga até 70% / 70–100% / acima da capacidade reservada para preventiva no dia (parte da jornada da equipe, ajustável em ⏱ Tempos)</div>
         <div class="detail" id="calDetail"><span class="muted">Clique em um dia para ver os equipamentos.</span></div>
       </div>
     </section>
@@ -581,7 +582,7 @@ async function startApp() {
   } catch (_) { S.admin = false; }
   $('#userChip').textContent = (S.perfil?.nome || S.user.email) + ' · ' + (S.admin ? 'administrador' : 'técnico');
   $('#admNote').hidden = S.admin;
-  $('#btnNewG').hidden = !S.admin; $('#btnNewE').hidden = !S.admin;
+  $('#btnNewG').hidden = !S.admin; $('#btnNewE').hidden = !S.admin; $('#btnTempos').hidden = !S.admin;
   try { await loadAll(); } catch (e) { toast(errMsg(e), 'bad'); }
 }
 
@@ -620,7 +621,7 @@ async function loadAll() {
       fetchAll('feriado', 'id,data,descricao', 'data').catch(() => []),
       fetchAll('ausencia', 'id,tecnico_id,data_inicio,data_fim,tipo,observacao', 'id').catch(() => []),
       // tempo estimado de preventiva por grupo (histórico + margem); se a view faltar, o calendário só não mostra horas
-      fetchAll('vw_tempo_estimado_preventiva', 'grupo_id,grupo,estimado_min,origem,amostras', 'grupo_id').catch(() => [])
+      fetchAll('vw_tempo_estimado_preventiva', 'grupo_id,grupo,estimado_min,calculado_min,manual_min,p75_min,mediana_min,amostras,origem', 'grupo_id').catch(() => [])
     ]);
     if (edg.error) throw edg.error;
     S.tecnicos = tec.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
@@ -639,6 +640,7 @@ async function loadAll() {
     S.ncs = ncs;
     S.feriados = fers; S.ausencias = auss;
     await carregaCfgPdf();
+    await carregaCfgTempo();
     S.planoById = new Map(planos.map(p => [p.id, p]));
     S.edGrupos = S.admin
       ? (edg.data || [])
@@ -1493,11 +1495,25 @@ function calEvents() {
 const fmtDur = m => { m = Math.round(m); if (m < 60) return m + ' min'; const h = Math.floor(m / 60), r = m % 60; return r ? `${h} h ${String(r).padStart(2, '0')}` : `${h} h`; };
 const estMin = e => S.tempoGrp?.get(e.grupo_id)?.estimado_min ?? null;
 function cargaDia(list) { let min = 0, sem = 0; list.forEach(e => { const m = estMin(e); if (m == null) sem++; else min += m; }); return {min, sem}; }
+// só uma parte da capacidade fica para preventiva (o resto vai para corretivas e outros serviços): parâmetro tempo_cap_preventiva_pct
+const TEMPO_CFG = {margem: 20, min_am: 3, passo: 5, cap: 40};
+const TEMPO_CFG_CHAVES = {margem: 'tempo_margem_pct', min_am: 'tempo_min_amostras', passo: 'tempo_arredondar_min', cap: 'tempo_cap_preventiva_pct'};
+const TEMPO_CFG_LIM = {margem: [0, 200], min_am: [1, 20], passo: [1, 60], cap: [5, 100]};
+async function carregaCfgTempo() {
+  try {
+    const {data, error} = await sb.from('app_config_os').select('chave,valor').in('chave', Object.values(TEMPO_CFG_CHAVES));
+    if (error) throw error;
+    for (const [k, ch] of Object.entries(TEMPO_CFG_CHAVES)) {
+      const r = (data || []).find(x => x.chave === ch), n = r ? Number(String(r.valor).replace(',', '.')) : NaN;
+      if (Number.isFinite(n)) TEMPO_CFG[k] = n;
+    }
+  } catch (_) { /* mantém os valores atuais */ }
+}
 function capDia(k) {
   const w = new Date(+k.slice(0, 4), +k.slice(5, 7) - 1, +k.slice(8, 10)).getDay(), jor = w === 0 ? 0 : w === 6 ? 240 : 480;
-  if (!jor || (S.feriados || []).some(f => f.data === k)) return {min: 0, n: 0};
+  if (!jor || (S.feriados || []).some(f => f.data === k)) return {min: 0, total: 0, n: 0};
   const n = S.tecnicos.filter(t => t.ativo !== false && !(S.ausencias || []).some(a => a.tecnico_id === t.id && k >= a.data_inicio && k <= a.data_fim)).length;
-  return {min: n * jor, n};
+  return {min: Math.round(n * jor * TEMPO_CFG.cap / 100), total: n * jor, n};
 }
 
 function renderCal() {
@@ -1525,7 +1541,7 @@ function renderCal() {
     const cg = cargaDia(list), cap = capDia(k), tem = cg.min || cg.sem;
     const ratio = cap.min ? cg.min / cap.min : (cg.min ? 2 : 0);
     const lv = tem && cg.min && k >= today ? (ratio >= 1 ? 'over' : ratio >= 0.7 ? 'warn' : 'ok') : '';   // cor só de hoje em diante
-    const load = tem ? `<span class="load${lv ? ' lv-' + lv : ''}" title="Preventiva estimada: ${cg.min ? fmtDur(cg.min) : '—'}${cg.sem ? ` (+ ${cg.sem} equipamento(s) sem estimativa)` : ''} · capacidade da equipe: ${cap.min ? fmtDur(cap.min) + ' (' + cap.n + ' técnicos)' : 'dia sem expediente'}">${lv === 'over' ? '⚠ ' : '⏱ '}${cg.min ? fmtDur(cg.min) : '?'}${cg.min && cg.sem ? ' +?' : ''}</span>` : '';
+    const load = tem ? `<span class="load${lv ? ' lv-' + lv : ''}" title="Preventiva estimada: ${cg.min ? fmtDur(cg.min) : '—'}${cg.sem ? ` (+ ${cg.sem} equipamento(s) sem estimativa)` : ''} · capacidade para preventiva: ${cap.min ? fmtDur(cap.min) + ' (' + TEMPO_CFG.cap + '% de ' + fmtDur(cap.total) + ', ' + cap.n + ' técnicos)' : 'dia sem expediente'}">${lv === 'over' ? '⚠ ' : '⏱ '}${cg.min ? fmtDur(cg.min) : '?'}${cg.min && cg.sem ? ' +?' : ''}</span>` : '';
     html += `<button type="button" class="day${d.getMonth() !== mo ? ' other' : ''}${k === today ? ' today' : ''}${c.sel === k ? ' sel' : ''}${lv ? ' lv-' + lv : ''}" data-day="${k}"><span class="n">${d.getDate()}</span><span class="dots">${dots}</span>${load}</button>`;
   }
   $('#calDays').innerHTML = html;
@@ -1547,13 +1563,68 @@ function renderDayDetail(by) {
   const faltam = list.filter(e => !abre(e)), jaOs = list.map(abre).filter(Boolean);
   const dayBar = (faltam.length || jaOs.length) ? `<div class="dayacts">${faltam.length ? `<button type="button" class="btn pri" data-opendia="${k}">＋ Abrir todas as OS do dia (${faltam.length})</button>` : ''}${jaOs.length ? `<button type="button" class="btn" data-printdia="${k}">🖨 Imprimir as OS do dia (${jaOs.length})</button>` : ''}</div>` : '';
   const cg = cargaDia(list), cap = capDia(k);
-  const resumo = (cg.min || cg.sem) ? `<div class="muted" style="font-size:12px;margin:0 0 6px">⏱ Preventiva estimada: <b>${cg.min ? '≈ ' + fmtDur(cg.min) : '—'}</b>${cg.sem ? ` (+ ${cg.sem} sem estimativa)` : ''} · capacidade da equipe: ${cap.min ? fmtDur(cap.min) + ' (' + cap.n + ' técnicos)' : 'dia sem expediente'}</div>` : '';
+  const resumo = (cg.min || cg.sem) ? `<div class="muted" style="font-size:12px;margin:0 0 6px">⏱ Preventiva estimada: <b>${cg.min ? '≈ ' + fmtDur(cg.min) : '—'}</b>${cg.sem ? ` (+ ${cg.sem} sem estimativa)` : ''} · capacidade para preventiva: ${cap.min ? fmtDur(cap.min) + ' (' + TEMPO_CFG.cap + '% de ' + fmtDur(cap.total) + ', ' + cap.n + ' técnicos)' : 'dia sem expediente'}</div>` : '';
   box.innerHTML = `<h4>${dd}/${mm}/${yy} — ${list.length} equipamento(s)</h4>` + resumo + dayBar +
     (list.map(e => `<div class="ev"><i class="lg lg-${e.status_manutencao}"></i>
       <div class="t"><b class="mono">${esc(e.equipamento_codigo || '')}</b> ${esc(e.equipamento_nome || '')}<br><small>${esc(e.grupo_nome || '')} · a cada ${e.periodicidade_dias ?? '—'} dias · última: ${esc(fmtDate(e.ultima_manutencao))} · ⏱ ${estMin(e) == null ? 'sem estimativa' : '≈ ' + fmtDur(estMin(e))}</small></div>
       <small>${esc(L.cal[e.status_manutencao] || '')}<br>${e.dias_restantes != null ? (e.dias_restantes < 0 ? Math.abs(e.dias_restantes) + ' d de atraso' : e.dias_restantes + ' d restantes') : ''}</small>${evAction(e)}</div>`).join('')
       || '<span class="muted">Nenhum vencimento neste dia (com os filtros atuais).</span>');
 }
+
+/* ⏱ Tempos (só admin): parâmetros do tempo estimado de preventiva + tempo manual por grupo */
+function openTempos() {
+  if (!S.admin) return;
+  const campo = (k, rot, dica) => `<label style="display:block;margin:0 0 10px"><b>${rot}</b>
+    <input id="tcfg_${k}" type="number" step="any" min="${TEMPO_CFG_LIM[k][0]}" max="${TEMPO_CFG_LIM[k][1]}" value="${TEMPO_CFG[k]}" style="width:90px;margin-left:8px">
+    <div class="muted" style="font-size:12px">${dica} Limites: ${TEMPO_CFG_LIM[k][0]} a ${TEMPO_CFG_LIM[k][1]}.</div></label>`;
+  const ORI = {manual: 'manual', historico: 'histórico', sem_estimativa: 'sem estimativa'};
+  const rows = [...(S.tempoGrp?.values() || [])].sort((a, b) => (a.origem === 'sem_estimativa') - (b.origem === 'sem_estimativa') || (b.amostras - a.amostras) || String(a.grupo).localeCompare(String(b.grupo), 'pt-BR'));
+  const d = v => v == null ? '—' : fmtDur(Number(v));
+  const tab = '<table><thead><tr><th>Grupo</th><th class="num">OS no histórico</th><th class="num">P75</th><th class="num">Calculado</th><th>Manual (min)</th><th class="num">Estimado</th><th>Origem</th></tr></thead><tbody>' +
+    (rows.map(r => `<tr><td>${esc(r.grupo)}</td><td class="num">${r.amostras}</td><td class="num">${d(r.p75_min)}</td><td class="num">${d(r.calculado_min)}</td>
+      <td><input type="number" min="1" max="1440" step="5" data-tman="${r.grupo_id}" data-orig="${r.manual_min ?? ''}" value="${r.manual_min ?? ''}" placeholder="—" style="width:80px"></td>
+      <td class="num"><b>${d(r.estimado_min)}</b></td><td>${ORI[r.origem] || ''}</td></tr>`).join('') || '<tr><td colspan="7" class="empty" style="cursor:default">Sem dados (a view vw_tempo_estimado_preventiva não foi encontrada).</td></tr>') + '</tbody></table>';
+  openModal({
+    title: 'Tempo estimado de preventiva', wide: true, closeLabel: 'Fechar',
+    body: `<p class="muted full" style="margin-top:0">Estimativa de cada grupo = percentil 75 do tempo por OS preventiva no histórico + margem de segurança, arredondada para cima. O <b>tempo manual</b> (em minutos) vale no lugar do calculado e não é apagado pelo recálculo diário. Campo manual vazio = usa o calculado.</p>
+      <div class="full" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 24px">
+      ${campo('margem', 'Margem de segurança (%)', 'Somada ao percentil 75 do histórico (20 = +20%).')}
+      ${campo('min_am', 'Mínimo de OS no histórico', 'Abaixo disso o grupo fica sem estimativa calculada (vale só o tempo manual).')}
+      ${campo('passo', 'Arredondar para cima de (min)', 'Ex.: 5 arredonda 42 min para 45.')}
+      ${campo('cap', 'Capacidade reservada para preventiva (%)', 'Parte da jornada da equipe destinada a preventiva no calendário; o resto vai para corretivas e outros serviços. Só muda a cor da barra de carga.')}
+      </div>
+      <div class="full" style="overflow:auto;max-height:42vh;margin-top:6px;white-space:nowrap">${tab}</div>`,
+    actions: [
+      {label: 'Recalcular histórico agora', run: async () => {
+        const {error} = await sb.rpc('fn_recalcular_tempo_estimado'); if (error) throw error;
+        await loadAll(); openTempos(); toast('Histórico recalculado.', 'good');
+      }},
+      {label: 'Salvar', cls: 'pri', run: async () => {
+        const novo = {};
+        for (const k of Object.keys(TEMPO_CFG_CHAVES)) {
+          const v = Number($('#tcfg_' + k).value);
+          if (!Number.isFinite(v) || v < TEMPO_CFG_LIM[k][0] || v > TEMPO_CFG_LIM[k][1]) throw new Error(`Valor fora do limite (${TEMPO_CFG_LIM[k][0]} a ${TEMPO_CFG_LIM[k][1]}).`);
+          novo[k] = v;
+        }
+        const man = $$('[data-tman]').map(i => ({id: i.dataset.tman, orig: i.dataset.orig, val: i.value.trim()})).filter(x => x.val !== x.orig);
+        for (const x of man) if (x.val !== '' && !(Number(x.val) >= 1 && Number(x.val) <= 1440)) throw new Error('Tempo manual: use minutos entre 1 e 1440 ou deixe em branco.');
+        for (const [k, ch] of Object.entries(TEMPO_CFG_CHAVES)) {
+          if (novo[k] === TEMPO_CFG[k]) continue;
+          const {data, error} = await sb.from('app_config_os').update({valor: String(novo[k]), atualizado_em: new Date().toISOString()}).eq('chave', ch).select('chave');
+          if (error) throw error;
+          if (!data?.length) throw new Error('Não foi possível gravar o parâmetro (sem permissão).');
+        }
+        for (const x of man) {
+          const {data, error} = await sb.from('tempo_estimado_preventiva').update({manual_min: x.val === '' ? null : Math.round(Number(x.val)), atualizado_em: new Date().toISOString()}).eq('grupo_id', x.id).select('grupo_id');
+          if (error) throw error;
+          if (!data?.length) throw new Error('Não foi possível gravar o tempo manual (sem permissão).');
+        }
+        await loadAll(); closeModal(); toast('Tempos salvos.', 'good');
+      }}
+    ]
+  });
+}
+$('#btnTempos').addEventListener('click', openTempos);
 
 $('#calDays').addEventListener('click', e => {
   const b = e.target.closest('[data-day]'); if (!b) return;
