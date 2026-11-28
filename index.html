@@ -105,9 +105,9 @@ td.empty{text-align:center;color:var(--muted);padding:22px;cursor:default}
 .dots{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
 .day .load{font-size:10px;font-weight:700;color:#475569;line-height:1.2;white-space:nowrap}
 .day .load.lv-warn{color:#92400e}.day .load.lv-over{color:#b91c1c}
-.lbar{display:block;width:100%;height:8px;border-radius:4px;background:#e2e8f0;overflow:hidden;margin-top:3px}
+.lbar{display:flex;width:100%;height:8px;border-radius:4px;background:#e2e8f0;overflow:hidden;margin-top:3px}
 .lbar.big{height:12px;border-radius:6px;margin:4px 0 8px}
-.lbar i{display:block;height:100%;border-radius:inherit}
+.lbar i{display:block;height:100%;flex:none}.lbar b{display:block;height:100%;flex:none;background:repeating-linear-gradient(45deg,#cbd5e1 0 4px,#e2e8f0 4px 8px)}
 .lbar.lv-ok i{background:var(--grn)}.lbar.lv-warn i{background:var(--yel)}.lbar.lv-over i{background:var(--red)}.lbar.lv-past i{background:#94a3b8}
 .dot{display:inline-flex;align-items:center;justify-content:center;min-width:14px;height:14px;border-radius:999px;font-size:9px;font-weight:800;color:#fff;padding:0 3px}
 .dot.atrasado,.lg-atrasado{background:var(--red)}
@@ -336,7 +336,7 @@ dialog::backdrop{background:rgba(15,23,42,.5)}
         </div>
         <div class="dow"><div>Dom</div><div>Seg</div><div>Ter</div><div>Qua</div><div>Qui</div><div>Sex</div><div>Sáb</div></div>
         <div class="days" id="calDays"></div>
-        <div class="muted" style="font-size:11px;margin-top:4px">⏱ = horas de preventiva estimadas pelo histórico de cada grupo (com margem de segurança) · barra = quanto do dia está ocupado: verde abaixo de 40%, amarela de 40% a 100%, vermelha cheia a partir de 100% da capacidade reservada para preventiva (parte da jornada da equipe, ajustável em ⏱ Tempos)</div>
+        <div class="muted" style="font-size:11px;margin-top:4px">⏱ = horas de preventiva estimadas pelo histórico de cada grupo (com margem de segurança) · barra = quanto do dia ainda está por abrir (equipamentos sem OS): verde abaixo de 40%, amarela de 40% a 100%, vermelha cheia a partir de 100% da capacidade reservada para preventiva; o trecho listrado é o que já tem OS aberta (parte da jornada da equipe, ajustável em ⏱ Tempos)</div>
         <div class="detail" id="calDetail"><span class="muted">Clique em um dia para ver os equipamentos.</span></div>
       </div>
     </section>
@@ -1691,11 +1691,14 @@ function cargaDia(list) { let min = 0, sem = 0; list.forEach(e => { const m = es
 const TEMPO_CFG = {margem: 20, min_am: 3, passo: 5, cap: 40};
 // barra de ocupação do dia: verde abaixo de 40% da capacidade, amarela de 40% até 100%, vermelha a partir de 100%; dias passados em cinza
 const TEMPO_BARRA = {amarelo: 40, vermelho: 100};
-function barraCarga(min, cap, k, today, big) {
-  if (!min) return {lv: '', pct: 0, html: ''};
-  const ratio = cap.min ? min / cap.min : 2, pct = Math.min(100, Math.round(ratio * 100));
-  const lv = k < today ? 'past' : ratio * 100 >= TEMPO_BARRA.vermelho ? 'over' : ratio * 100 >= TEMPO_BARRA.amarelo ? 'warn' : 'ok';
-  return {lv, pct: cap.min ? Math.round(ratio * 100) : null, html: `<span class="lbar${big ? ' big' : ''} lv-${lv}" role="img" aria-label="Ocupação do dia: ${cap.min ? Math.round(ratio * 100) + '%' : 'dia sem expediente'}"><i style="width:${pct}%"></i></span>`};
+function barraCarga(minSem, minOs, cap, k, today, big) {
+  // a cor e o preenchimento vêm só do que AINDA NÃO TEM OS; o trecho listrado mostra o que já foi aberto (já em andamento)
+  if (!minSem && !minOs) return {lv: '', pct: 0, html: ''};
+  const rs = cap.min ? minSem / cap.min : (minSem ? 2 : 0), ro = cap.min ? minOs / cap.min : 0;
+  const pS = Math.min(100, Math.round(rs * 100)), pO = Math.max(0, Math.min(100 - pS, Math.round(ro * 100)));
+  const lv = k < today ? 'past' : rs * 100 >= TEMPO_BARRA.vermelho ? 'over' : rs * 100 >= TEMPO_BARRA.amarelo ? 'warn' : 'ok';
+  const txt = cap.min ? Math.round(rs * 100) + '% ainda sem OS' + (minOs ? ' + ' + Math.round(ro * 100) + '% já com OS aberta' : '') : 'dia sem expediente';
+  return {lv, pct: cap.min ? Math.round(rs * 100) : null, html: `<span class="lbar${big ? ' big' : ''} lv-${lv}" role="img" aria-label="Ocupação do dia: ${txt}"><i style="width:${pS}%"></i>${pO ? `<b style="width:${pO}%"></b>` : ''}</span>`};
 }
 const TEMPO_CFG_CHAVES = {margem: 'tempo_margem_pct', min_am: 'tempo_min_amostras', passo: 'tempo_arredondar_min', cap: 'tempo_cap_preventiva_pct'};
 const TEMPO_CFG_LIM = {margem: [0, 200], min_am: [1, 20], passo: [1, 60], cap: [5, 100]};
@@ -1738,10 +1741,11 @@ function renderCal() {
     list.forEach(e => { if (n[e.status_manutencao] !== undefined) n[e.status_manutencao]++; });
     const dots = ['atrasado', 'proximo', 'ok'].filter(s => n[s])
       .map(s => `<span class="dot ${s}" title="${n[s]} · ${L.cal[s]}">${n[s] > 1 ? n[s] : ''}</span>`).join('');
-    const cg = cargaDia(list), cap = capDia(k), tem = cg.min || cg.sem;
-    const bar = barraCarga(cg.min, cap, k, today, false);
+    const abreOs = o => S.os.find(x => x.equipamento_id === o.equipamento_id && x.plano_id === o.plano_id && x.status !== 'concluida');
+    const cg = cargaDia(list.filter(e => !abreOs(e))), cgA = cargaDia(list.filter(e => abreOs(e))), cap = capDia(k), tem = cg.min || cg.sem;
+    const bar = barraCarga(cg.min, cgA.min, cap, k, today, false);
     const lv = bar.lv === 'past' ? '' : bar.lv;   // cor só de hoje em diante
-    const load = tem ? `<span class="load${lv ? ' lv-' + lv : ''}" title="Preventiva estimada: ${cg.min ? fmtDur(cg.min) : '—'}${cg.sem ? ` (+ ${cg.sem} equipamento(s) sem estimativa)` : ''} · capacidade para preventiva: ${cap.min ? fmtDur(cap.min) + ' (' + TEMPO_CFG.cap + '% de ' + fmtDur(cap.total) + ', ' + cap.n + ' técnicos)' : 'dia sem expediente'}">${lv === 'over' ? '⚠ ' : '⏱ '}${cg.min ? fmtDur(cg.min) : '?'}${cg.min && cg.sem ? ' +?' : ''}</span>` : '';
+    const load = (tem || cgA.min || cgA.sem) ? `<span class="load${lv ? ' lv-' + lv : ''}" title="Ainda sem OS: ${cg.min ? fmtDur(cg.min) : '—'}${cgA.min || cgA.sem ? ' · já com OS aberta: ' + fmtDur(cgA.min) : ''}${cg.sem ? ` (+ ${cg.sem} equipamento(s) sem estimativa)` : ''} · capacidade para preventiva: ${cap.min ? fmtDur(cap.min) + ' (' + TEMPO_CFG.cap + '% de ' + fmtDur(cap.total) + ', ' + cap.n + ' técnicos)' : 'dia sem expediente'}">${tem ? (lv === 'over' ? '⚠ ' : '⏱ ') + (cg.min ? fmtDur(cg.min) : '?') + (cg.min && cg.sem ? ' +?' : '') : '✓ OS abertas'}</span>` : '';
     html += `<button type="button" class="day${d.getMonth() !== mo ? ' other' : ''}${k === today ? ' today' : ''}${c.sel === k ? ' sel' : ''}" data-day="${k}"><span class="n">${d.getDate()}</span><span class="dots">${dots}</span>${load}${bar.html}</button>`;
   }
   $('#calDays').innerHTML = html;
@@ -1762,9 +1766,9 @@ function renderDayDetail(by) {
   const abre = o => S.os.find(x => x.equipamento_id === o.equipamento_id && x.plano_id === o.plano_id && x.status !== 'concluida');
   const faltam = list.filter(e => !abre(e)), jaOs = list.map(abre).filter(Boolean);
   const dayBar = (faltam.length || jaOs.length) ? `<div class="dayacts">${faltam.length ? `<button type="button" class="btn pri" data-opendia="${k}">＋ Abrir todas as OS do dia (${faltam.length})</button>` : ''}${jaOs.length ? `<button type="button" class="btn" data-printdia="${k}">🖨 Imprimir as OS do dia (${jaOs.length})</button>` : ''}</div>` : '';
-  const cg = cargaDia(list), cap = capDia(k), bar = barraCarga(cg.min, cap, k, iso(new Date()), true);
-  const cgSem = cargaDia(faltam), cgOs = cargaDia(list.filter(e => abre(e)));
-  const resumo = (cg.min || cg.sem) ? `<div class="muted" style="font-size:12px;margin:0 0 6px">⏱ Preventiva estimada: <b>${cg.min ? '≈ ' + fmtDur(cg.min) : '—'}</b>${cg.sem ? ` (+ ${cg.sem} sem estimativa)` : ''}${bar.pct != null && cg.min ? ` · <b>${bar.pct}%</b> da capacidade` : ''} · capacidade para preventiva: ${cap.min ? fmtDur(cap.min) + ' (' + TEMPO_CFG.cap + '% de ' + fmtDur(cap.total) + ', ' + cap.n + ' técnicos)' : 'dia sem expediente'}${cg.min ? `<br>Ainda sem OS: <b>${fmtDur(cgSem.min)}</b> · Com OS já aberta: <b>${fmtDur(cgOs.min)}</b>` : ''}</div>${bar.html}` : '';
+  const cg = cargaDia(list), cap = capDia(k);
+  const cgSem = cargaDia(faltam), cgOs = cargaDia(list.filter(e => abre(e))), bar = barraCarga(cgSem.min, cgOs.min, cap, k, iso(new Date()), true);
+  const resumo = (cg.min || cg.sem) ? `<div class="muted" style="font-size:12px;margin:0 0 6px">⏱ Preventiva estimada: <b>${cg.min ? '≈ ' + fmtDur(cg.min) : '—'}</b>${cg.sem ? ` (+ ${cg.sem} sem estimativa)` : ''}${bar.pct != null && cg.min ? ` · <b>${bar.pct}%</b> da capacidade ainda sem OS` : ''} · capacidade para preventiva: ${cap.min ? fmtDur(cap.min) + ' (' + TEMPO_CFG.cap + '% de ' + fmtDur(cap.total) + ', ' + cap.n + ' técnicos)' : 'dia sem expediente'}${cg.min ? `<br>Ainda sem OS: <b>${fmtDur(cgSem.min)}</b> · Com OS já aberta: <b>${fmtDur(cgOs.min)}</b>` : ''}</div>${bar.html}` : '';
   box.innerHTML = `<h4>${dd}/${mm}/${yy} — ${list.length} equipamento(s)</h4>` + resumo + dayBar +
     (list.map(e => `<div class="ev"><i class="lg lg-${e.status_manutencao}"></i>
       <div class="t"><b class="mono">${esc(e.equipamento_codigo || '')}</b> ${esc(e.equipamento_nome || '')}<br><small>${esc(e.grupo_nome || '')} · a cada ${e.periodicidade_dias ?? '—'} dias · última: ${esc(fmtDate(e.ultima_manutencao))} · ⏱ ${estMin(e) == null ? 'sem estimativa' : '≈ ' + fmtDur(estMin(e))}</small></div>
